@@ -1,0 +1,37 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Build') {
+            steps {
+                bat 'docker build -t aniket3003/vote:latest vote'
+                bat 'docker build -t aniket3003/result:latest result'
+                bat 'docker build -t aniket3003/worker:latest worker'
+            }
+        }
+
+        stage('Push') {
+            steps {
+                bat 'docker push aniket3003/vote:latest'
+                bat 'docker push aniket3003/result:latest'
+                bat 'docker push aniket3003/worker:latest'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                bat 'kubectl apply -f k8s-specifications/'
+                bat 'kubectl rollout restart deployment vote'
+                bat 'kubectl rollout restart deployment result'
+                bat 'kubectl rollout restart deployment worker'
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                bat 'kubectl get pods'
+                bat 'kubectl get svc'
+            }
+        }
+    }
+}

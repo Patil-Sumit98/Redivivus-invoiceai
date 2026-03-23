@@ -1,0 +1,57 @@
+name: Deploy to Kubernetes
+
+on:
+  workflow_run:
+    workflows:
+      - Build Vote
+      - Build Result
+      - Build Worker
+    types:
+      - completed
+
+jobs:
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # ✅ Login to AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # ✅ Install kubectl
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      # ✅ Automatically connect to EKS
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ secrets.AWS_REGION }} \
+            --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+      # ✅ Verify connection
+      - name: Verify Kubernetes connection
+        run: kubectl get nodes
+
+      # ✅ Deploy manifests
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -f k8s-specifications/
+
+      # ✅ Restart deployments
+      - name: Restart deployments
+        run: |
+          kubectl rollout restart deployment vote
+          kubectl rollout restart deployment result
+          kubectl rollout restart deployment worker
+
+      # ✅ Show pod status
+      - name: Show Pods Status
+        run: kubectl get pods -o wide
