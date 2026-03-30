@@ -10,6 +10,7 @@ class Invoice(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     user_id = Column(String(36), ForeignKey("users.id"))
     status = Column(String, default="processing")
+    original_filename = Column(String)
     file_url = Column(String)
     raw_json = Column(Text)  
     data_json = Column(JSON)  
