@@ -1,14 +1,24 @@
-# InvoiceAI – Smart Invoice Processing Platform
+# InvoiceAI – Enterprise Invoice Processing Platform
 
-InvoiceAI is an end-to-end full-stack application that allows users to upload, process, and extract rich information from invoices using **Azure Document Intelligence** and store the documents securely via **Azure Blob Storage**.
+InvoiceAI is a comprehensive full-stack application designed to automate the extraction, processing, and management of financial invoices. Leveraging **Azure Document Intelligence** for high-accuracy OCR/Data extraction and **Azure Blob Storage** for secure document archiving, this platform eliminates manual data entry and streamlines financial operations.
 
-This repository contains both the fully functional FastAPI Backend (`/app`) and the seamlessly integrated Vanilla HTML/JS Frontend (`/frontend`). 
+This repository encompasses a production-ready **FastAPI Backend**, an asynchronous background processing pipeline, and a modular **Vanilla HTML/JS Frontend**, unified within a cohesive monolithic architecture for simplified deployment.
 
 ---
 
-## 🚀 Quick Start Guide for Beginners
+## 🌟 Key Features & Capabilities
 
-Follow these simple steps to run this application locally on your machine from scratch. 
+- **Automated Data Extraction**: Extracts complex invoice entities (Vendor Details, GSTINs, Line Items, Tax Rates, and Confidence Scores) using pre-built machine learning models.
+- **Asynchronous Processing**: Employs non-blocking background tasks to handle Azure API communication and database transactions without degrading user experience.
+- **Secure Architecture**: Implements stateless JWT (JSON Web Token) authentication and bcrypt password hashing.
+- **Robust Storage**: Integrates directly with Azure Blob Storage for reliable cloud-hosted document persistence.
+- **Interactive Dashboard**: A responsive, premium-designed interface displaying real-time extraction analytics, confidence metrics, and processing statuses.
+
+---
+
+## 🚀 Quick Start Guide
+
+Follow these instructions to configure and execute the application locally from scratch.
 
 ### Prerequisites
 - Python 3.10+ installed
@@ -21,8 +31,8 @@ git clone https://github.com/Patil-Sumit98/invoiceai-backend.git
 cd invoiceai-backend
 ```
 
-### Step 2: Set Up Your Virtual Environment
-To keep things clean, install the dependencies inside a virtual environment.
+### Step 2: Set Up the Virtual Environment
+To isolate project dependencies, create and activate a Python virtual environment.
 **For Windows:**
 ```powershell
 python -m venv venv
@@ -34,14 +44,13 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### Step 3: Install Requirements
-With your virtual environment active, install all the python packages the app needs:
+### Step 3: Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
 ### Step 4: Configure Environment Variables
-You need to pass your Azure API keys to the backend. Create a new file right in the project root folder named exactly `.env` (no filename before the dot), and paste this inside:
+Create a file named `.env` in the root directory and populate it with your environment-specific credentials:
 
 ```env
 # 1. AZURE DOCUMENT INTELLIGENCE
@@ -52,51 +61,45 @@ AZURE_DOCUMENT_INTELLIGENCE_KEY="your-secret-key"
 AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=...;EndpointSuffix=core.windows.net"
 AZURE_STORAGE_CONTAINER_NAME="invoices-test"
 
-# 3. SECRETS & DB
+# 3. SECRETS & DATABASE
 DATABASE_URL="sqlite:///./invoiceai.db"
-# You can generate a random string for JWT_SECRET
 JWT_SECRET="your_highly_secure_random_string" 
 ```
 
-### Step 5: Initialize the Database
-Before running the app, you need to create the database schemas locally. Run these commands:
+### Step 5: Initialize the Database Schema
+Apply the Alembic migrations to build the necessary database tables (Users, Invoices, etc.):
 ```bash
 alembic upgrade head
 ```
-*(This commands creates an `invoiceai.db` SQLite file locally and wires up all the tables).*
 
-### Step 6: Start the Server!
-Finally, start up the FastAPI backend!
+### Step 6: Launch the Application
+Start the FastAPI server:
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Step 7: View the App ✨
-Since the frontend code is baked right into the backend, you do NOT need a separate frontend server.
-
-Just open your favorite web browser and navigate directly to:
+### Step 7: Access the Platform
+Navigate to the following URL in your web browser to access the frontend interface:
 👉 **[http://localhost:8000/frontend](http://localhost:8000/frontend)**
-
-You will see the beautiful Swiss Financial Light Theme user interface. Register a new account, login, and upload a test PDF invoice! 
 
 ---
 
-## 🛠️ Tech Stack
-- **Backend**: Python, FastAPI, SQLAlchemy, Alembic
-- **Frontend**: Vanilla Javascript (ES6), HTML5, CSS3 
-- **Database**: SQLite (local)
-- **AI & Cloud**: Azure AI Document Intelligence SDK, Azure Blob Storage SDK
-- **Security**: JWT Authentication, bcrypt password hashing
+## 🛠️ Technology Stack
+- **Backend**: Python 3.10+, FastAPI, SQLAlchemy (ORM), Alembic (Migrations)
+- **Frontend**: ES6 Javascript, HTML5, CSS3 (No framework dependencies)
+- **Database**: SQLite (Configured for local deployment, easily substitutable for PostgreSQL)
+- **Cloud Services**: Azure AI Document Intelligence SDK, Azure Blob Storage SDK
+- **Authentication**: JWT (JSON Web Tokens), Passlib (Bcrypt)
 
-## 📁 Repository Structure
+## 📁 Repository Architecture
 ```text
-/alembic           # Database migration files
+/alembic           # Database migration configurations
 /app
- ├── routes/       # API endpoints (auth, invoices)
+ ├── routers/      # API endpoints (Authentication & Invoice routing)
  ├── models/       # SQLAlchemy database schemas
- ├── services/     # Azure Cloud integrations and core logic
-/frontend          # Decoupled UI assets
- ├── assets/css/   # Premium styling
- ├── assets/js/    # API integration & app logic
- └── index.html    # Base application shell
+ ├── services/     # Azure Cloud integrations and background tasks
+/frontend          # Decoupled UI assets served via FastAPI static mounts
+ ├── assets/css/   # Application styling
+ ├── assets/js/    # API integration & DOM manipulation logic
+ └── index.html    # Core application shell
 ```
