@@ -1,13 +1,31 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, invoices  # <-- Add 'invoices' here
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from app.routers import auth, invoices
 
-app = FastAPI(title="InvoiceAI Backend")
+app = FastAPI(
+    title="InvoiceAI API",
+    description="AI-powered invoice processing for Indian GST",
+    version="1.0.0"
+)
 
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+import os
+if os.getenv("ENVIRONMENT", "dev") == "dev":
+    origins = [
+        "http://127.0.0.1:5500", 
+        "http://127.0.0.1:5501", 
+        "http://localhost:5500", 
+        "http://localhost:5501",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000"
+    ]
+else:
+    origins = [
+        "https://yourdomain.com",
+        "http://localhost:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,8 +36,31 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(invoices.router)  # <-- Add this line
+app.include_router(invoices.router)
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_ASSETS_DIR = FRONTEND_DIR / "assets"
+
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount(
+        "/frontend/assets",
+        StaticFiles(directory=str(FRONTEND_ASSETS_DIR)),
+        name="frontend-assets",
+    )
 
 @app.get("/")
-async def root():
-    return {"message": "InvoiceAI API is running. Phase 2 Complete."}
+def root():
+    return {"message": "InvoiceAI API v1.0 — Phase 2 Complete", "docs": "/docs"}
+
+
+@app.get("/frontend")
+def frontend_app():
+    index_file = FRONTEND_DIR / "index.html"
+    if not index_file.exists():
+        return {"message": "Frontend build not found"}
+    return FileResponse(str(index_file))
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "1.0.0"}

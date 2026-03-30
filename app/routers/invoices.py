@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.user import User
 from app.models.invoice import Invoice
 from app.middleware.auth import get_current_user
@@ -11,39 +10,43 @@ from app.services.invoice_mapper import map_fields
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
-def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str, db: Session):
-    """Background task to handle the heavy lifting of uploading and AI extraction."""
+ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str):
+    """Background task — creates its OWN DB session."""
+    db = SessionLocal()
     try:
-        # 1. Upload to Azure Blob Storage
         file_url = upload_file_to_blob(file_bytes, filename)
-        
-        # 2. Call Azure Document Intelligence
         raw_fields = analyze_invoice(file_url)
-        
-        # 3. Map the messy Azure response to our clean API contract
         mapped_data = map_fields(raw_fields)
-        
-        # Calculate a rough average confidence score
-        confidences = [v.get("confidence", 0.0) for k, v in mapped_data.items() if isinstance(v, dict) and "confidence" in v]
+
+        confidences = [
+            v.get("confidence", 0.0)
+            for v in mapped_data.values()
+            if isinstance(v, dict) and "confidence" in v
+        ]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        
-        # 4. Save everything to the database
+
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if invoice:
             invoice.file_url = file_url
-            invoice.raw_json = str(raw_fields)  # Save raw string for debugging
-            invoice.data_json = mapped_data     # Save structured JSON
-            invoice.confidence = round(avg_confidence, 2)
+            invoice.raw_json = str(raw_fields)
+            invoice.data_json = mapped_data
+            invoice.confidence = round(avg_confidence, 4)
             invoice.status = "completed"
             db.commit()
-            
+
     except Exception as e:
-        # If anything fails (e.g., Azure timeout), mark it as failed
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-        if invoice:
-            invoice.status = "failed"
+        print(f"[ERROR] Invoice {invoice_id}: {str(e)}")
+        db.rollback()
+        inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if inv:
+            inv.status = "failed"
             db.commit()
-        print(f"Background Task Error: {str(e)}")
+    finally:
+        db.close()
+
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_invoice(
@@ -52,64 +55,103 @@ async def upload_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Validate file type per best practices
-    if not file.filename.lower().endswith(('.pdf', '.jpg', '.png')):
-        raise HTTPException(status_code=400, detail="Only PDF, JPG, and PNG files are allowed")
+    import os
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed. Use PDF, JPG, or PNG.")
 
-    # Read bytes immediately before passing to the background task
     file_bytes = await file.read()
-    
-    # Create the initial "processing" record in the database
-    new_invoice = Invoice(user_id=current_user.id, status="processing")
+    if len(file_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File exceeds 20MB limit")
+
+    new_invoice = Invoice(
+        user_id=current_user.id,
+        status="processing",
+        original_filename=file.filename
+    )
     db.add(new_invoice)
     db.commit()
     db.refresh(new_invoice)
-    
-    # Fire off the background task
+
     background_tasks.add_task(
-        process_invoice_task, 
-        invoice_id=new_invoice.id, 
-        file_bytes=file_bytes, 
-        filename=file.filename, 
-        db=db
+        process_invoice_task,
+        invoice_id=new_invoice.id,
+        file_bytes=file_bytes,
+        filename=file.filename
     )
-    
-    # Return immediately so the frontend can start polling
+
     return {"id": new_invoice.id, "status": new_invoice.status}
 
-@router.get("/{invoice_id}")
-def get_invoice(invoice_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    invoice = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.user_id == current_user.id).first()
-    
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-        
-    # Manually construct the response to match the contract schema
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from sqlalchemy import func as sqlfunc
+    base = db.query(Invoice).filter(Invoice.user_id == current_user.id)
+    avg_conf = db.query(sqlfunc.avg(Invoice.confidence)).filter(
+        Invoice.user_id == current_user.id, Invoice.status == "completed"
+    ).scalar()
     return {
-        "id": invoice.id,
-        "status": invoice.status,
-        "file_url": invoice.file_url,
-        "created_at": invoice.created_at,
-        "confidence_score": invoice.confidence,
-        "data": invoice.data_json,  # This injects the mapped JSON
-        "error_message": None if invoice.status != "failed" else "Processing failed"
+        "total": base.count(),
+        "completed": base.filter(Invoice.status == "completed").count(),
+        "processing": base.filter(Invoice.status == "processing").count(),
+        "failed": base.filter(Invoice.status == "failed").count(),
+        "avg_confidence": round(float(avg_conf or 0), 4)
     }
 
+
 @router.get("/")
-def list_invoices(skip: int = 0, limit: int = 20, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    invoices = db.query(Invoice).filter(Invoice.user_id == current_user.id).order_by(Invoice.created_at.desc()).offset(skip).limit(limit).all()
-    
+def list_invoices(
+    skip: int = 0, limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.user_id == current_user.id)
+        .order_by(Invoice.created_at.desc())
+        .offset(skip).limit(limit).all()
+    )
     total = db.query(Invoice).filter(Invoice.user_id == current_user.id).count()
-    
+
     return {
         "items": [
             {
-                "id": inv.id, 
-                "status": inv.status, 
+                "id": inv.id,
+                "status": inv.status,
+                "original_filename": inv.original_filename,
                 "created_at": inv.created_at,
+                "confidence_score": inv.confidence,
                 "vendor_name": inv.data_json.get("vendor_name", {}).get("value") if inv.data_json else None,
-                "total_amount": inv.data_json.get("total_amount", {}).get("value") if inv.data_json else None
-            } for inv in invoices
+                "total_amount": inv.data_json.get("total_amount", {}).get("value") if inv.data_json else None,
+                "invoice_number": inv.data_json.get("invoice_number", {}).get("value") if inv.data_json else None,
+            }
+            for inv in invoices
         ],
         "total": total
+    }
+
+
+@router.get("/{invoice_id}")
+def get_invoice(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    invoice = db.query(Invoice).filter(
+        Invoice.id == invoice_id,
+        Invoice.user_id == current_user.id
+    ).first()
+
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    return {
+        "id": invoice.id,
+        "status": invoice.status,
+        "original_filename": invoice.original_filename,
+        "file_url": invoice.file_url,
+        "created_at": invoice.created_at,
+        "confidence_score": invoice.confidence,
+        "data": invoice.data_json,
+        "error_message": "Processing failed" if invoice.status == "failed" else None
     }
