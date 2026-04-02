@@ -146,6 +146,30 @@ function doLogout() {
   showToast('Signed out', 'info');
 }
 
+async function doDeleteInvoice(id) {
+  if (!confirm('Are you sure you want to permanently delete this invoice? This action cannot be undone.')) return;
+  try {
+    await request('DELETE', `/invoices/${id}`);
+    showToast('Invoice deleted', 'success');
+    if (currentPage === 'detail') go('invoices');
+    else if (currentPage === 'invoices') renderInvoices(document.getElementById('page-content'));
+    else if (currentPage === 'dashboard') renderDashboard(document.getElementById('page-content'));
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function doReprocessInvoice(id) {
+  try {
+    await request('POST', `/invoices/${id}/reprocess`);
+    showToast('Reprocessing started…', 'info');
+    if (currentPage === 'detail') loadDetail(id);
+    else if (currentPage === 'invoices') renderInvoices(document.getElementById('page-content'));
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
 // Auto-restore session on load
 window.addEventListener('DOMContentLoaded', async () => {
   // Enter key on auth inputs
@@ -566,6 +590,16 @@ async function loadDetail(id) {
           <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 1 0 0 2h2.586l-6.293 6.293a1 1 0 1 0 1.414 1.414L15 6.414V9a1 1 0 1 0 2 0V4a1 1 0 0 0-1-1h-5zM5 5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3a1 1 0 0 0-2 0v3H5V7h3a1 1 0 0 0 0-2H5z"/></svg>
           View file
         </a>` : ''}
+        <div class="meta-divider"></div>
+        <button class="btn btn-secondary btn-xs" style="gap:4px;color:var(--text-2)" onclick="doReprocessInvoice('${escAttr(id)}')">
+          <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path d="M4 2a1 1 0 0 1 1 1v1h10V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM4 6H3v11h14V6h-1v1a1 1 0 1 1-2 0V6H6v1a1 1 0 1 1-2 0V6z"/></svg>
+          Reprocess
+        </button>
+        <div class="meta-divider"></div>
+        <button class="btn btn-danger btn-xs" style="gap:4px" onclick="doDeleteInvoice('${escAttr(id)}')">
+          <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 0 0-.894.553L7.382 4H4a1 1 0 0 0 0 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a1 1 0 1 0 0-2h-3.382l-.724-1.447A1 1 0 0 0 11 2H9zM7 8a1 1 0 0 1 2 0v6a1 1 0 1 1-2 0V8zm5-1a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0V8a1 1 0 0 0-1-1z" clip-rule="evenodd"/></svg>
+          Delete
+        </button>
       </div>
 
       <!-- Two-column grid: Vendor / Buyer -->
@@ -717,7 +751,7 @@ function renderInvoiceRows(containerId, items, isShort) {
         <th>Status</th>
         <th>Confidence</th>
         <th>Date</th>
-        ${isShort ? '' : '<th>File</th>'}
+        <th style="text-align:right">Actions</th>
       </tr></thead>
       <tbody>
         ${items.map(inv => `
@@ -738,9 +772,11 @@ function renderInvoiceRows(containerId, items, isShort) {
             <td>${statusBadge(inv.status)}</td>
             <td>${confBar(inv.confidence_score)}</td>
             <td style="font-family:var(--mono);font-size:12px;color:var(--text-2);white-space:nowrap">${fmtDateShort(inv.created_at)}</td>
-            ${isShort ? '' : `<td style="font-size:12px;color:var(--text-3);font-family:var(--mono);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              ${inv.original_filename ? escHtml(inv.original_filename) : '—'}
-            </td>`}
+            <td style="text-align:right">
+              <button class="btn btn-ghost btn-xs" style="color:var(--text-3);padding:2px" onclick="event.stopPropagation(); doDeleteInvoice('${escAttr(inv.id)}')">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 0 0-.894.553L7.382 4H4a1 1 0 0 0 0 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a1 1 0 1 0 0-2h-3.382l-.724-1.447A1 1 0 0 0 11 2H9zM7 8a1 1 0 0 1 2 0v6a1 1 0 1 1-2 0V8zm5-1a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0V8a1 1 0 0 0-1-1z" clip-rule="evenodd"/></svg>
+              </button>
+            </td>
           </tr>`).join('')}
       </tbody>
     </table>`;
