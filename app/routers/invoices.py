@@ -156,6 +156,8 @@ async def upload_invoice(
             detail="File content does not match the claimed extension. Possible corrupted or disguised file.",
         )
 
+    from sqlalchemy.exc import IntegrityError
+
     new_invoice = Invoice(
         user_id=current_user.id,
         status="processing",
@@ -164,9 +166,25 @@ async def upload_invoice(
         source_type="UNKNOWN",
         ingestion_method="PENDING",
     )
-    db.add(new_invoice)
-    db.commit()
-    db.refresh(new_invoice)
+
+    # BUG-08: Handle race condition on idempotency key
+    try:
+        db.add(new_invoice)
+        db.commit()
+        db.refresh(new_invoice)
+    except IntegrityError:
+        db.rollback()
+        # Re-fetch the existing invoice that won the race
+        existing = db.query(Invoice).filter(
+            Invoice.user_id == current_user.id,
+            Invoice.idempotency_key == hashed_key,
+        ).first()
+        if existing:
+            return JSONResponse(
+                status_code=200,
+                content={"id": existing.id, "status": existing.status},
+            )
+        raise HTTPException(status_code=500, detail="Unexpected conflict during upload.")
 
     background_tasks.add_task(
         process_invoice_task,

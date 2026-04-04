@@ -144,7 +144,7 @@ export const InvoiceDetailPage = () => {
                 {activeTab === 'gst' && (
                   <div className="p-6 animate-in fade-in duration-300">
                     <h3 className="text-lg font-bold tracking-tight text-gray-900 mb-6 pb-4 border-b border-gray-100">Automated Ruleset Execution</h3>
-                    <GSTRulesPanel rules={gstRulesJson} />
+                    <GSTRulesPanel gstData={gstRulesJson} />
                   </div>
                 )}
 
