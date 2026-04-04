@@ -16,6 +16,8 @@ from app.config import settings
 from app.database import Base
 from app.models.user import User
 from app.models.invoice import Invoice
+from app.models.review_log import ReviewLog
+from app.models.webhook import Webhook, WebhookDelivery
 # ---------------------------------------------------------
 
 # this is the Alembic Config object, which provides

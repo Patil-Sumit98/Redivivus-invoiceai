@@ -94,3 +94,48 @@ def map_fields(raw_fields: dict) -> dict:
             })
 
     return data
+
+def map_gst_qr_to_canonical(qr_data: dict) -> dict:
+    """Takes a raw GST QR JSON payload and formats it to the canonical API structure."""
+    if not qr_data:
+        return {}
+
+    def _val(keys, default=None):
+        for k in keys:
+            if k in qr_data:
+                return qr_data[k]
+        return default
+
+    # Date usually DD/MM/YYYY. We map to YYYY-MM-DD.
+    raw_date = _val(["DocDt", "InvDt", "Date"])
+    formatted_date = None
+    if raw_date and isinstance(raw_date, str):
+        if "/" in raw_date:
+            parts = raw_date.split("/")
+            if len(parts) == 3:
+                formatted_date = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        elif "-" in raw_date:
+            parts = raw_date.split("-")
+            if len(parts) == 3 and len(parts[0]) == 4:
+                formatted_date = raw_date
+            elif len(parts) == 3:
+                formatted_date = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+
+    def _make(val):
+        return {"value": val, "confidence": 1.0} if val is not None else {"value": None, "confidence": 0.0}
+
+    return {
+        "vendor_name": _make(_val(["SellerNm", "SellerName", "TrdNm"])),
+        "vendor_gstin": _make(_val(["SellerGstin", "Gstin", "SupGstin"])),
+        "invoice_number": _make(_val(["DocNo", "InvNo"])),
+        "invoice_date": _make(formatted_date),
+        "due_date": _make(None),
+        "buyer_name": _make(_val(["BuyNm", "BuyerName", "LglNm"])),
+        "buyer_gstin": _make(_val(["BuyerGstin", "BuyGstin"])),
+        "subtotal": _make(_val(["AssVal", "TotAssVal"])),
+        "total_amount": _make(_val(["TotInvVal", "InvVal", "TotVal"])),
+        "cgst": _make(_val(["CgstVal", "TotCgst"])),
+        "sgst": _make(_val(["SgstVal", "TotSgst"])),
+        "igst": _make(_val(["IgstVal", "TotIgst"])),
+        "line_items": []
+    }

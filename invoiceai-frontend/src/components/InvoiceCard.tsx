@@ -1,0 +1,1 @@
+export const InvoiceCard = () => <div>Invoice Card</div>;
