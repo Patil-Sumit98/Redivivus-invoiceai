@@ -1,0 +1,1 @@
+export const Progress = (props: any) => <div {...props} />;
