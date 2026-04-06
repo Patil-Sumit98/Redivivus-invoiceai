@@ -124,6 +124,18 @@ def map_gst_qr_to_canonical(qr_data: dict) -> dict:
     def _make(val):
         return {"value": val, "confidence": 1.0} if val is not None else {"value": None, "confidence": 0.0}
 
+    # BUG-10: Parse ItemList from GST e-Invoice QR codes
+    item_list = qr_data.get("ItemList", [])
+    line_items = []
+    for item in (item_list if isinstance(item_list, list) else []):
+        line_items.append({
+            "description": item.get("PrdDesc") or item.get("Nm"),
+            "quantity": item.get("Qty"),
+            "rate": item.get("UnitPrice") or item.get("UntPrice"),
+            "amount": item.get("TotAmt") or item.get("AssAmt"),
+            "hsn_code": item.get("HsnCd"),
+        })
+
     return {
         "vendor_name": _make(_val(["SellerNm", "SellerName", "TrdNm"])),
         "vendor_gstin": _make(_val(["SellerGstin", "Gstin", "SupGstin"])),
@@ -137,5 +149,5 @@ def map_gst_qr_to_canonical(qr_data: dict) -> dict:
         "cgst": _make(_val(["CgstVal", "TotCgst"])),
         "sgst": _make(_val(["SgstVal", "TotSgst"])),
         "igst": _make(_val(["IgstVal", "TotIgst"])),
-        "line_items": []
+        "line_items": line_items
     }

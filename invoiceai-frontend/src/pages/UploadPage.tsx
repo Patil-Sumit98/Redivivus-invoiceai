@@ -1,13 +1,11 @@
-
 import { useUploadInvoice } from '../hooks/useUploadInvoice';
 import { FileDropzone } from '../components/FileDropzone';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { FileSearch, Sparkles, ServerCog } from 'lucide-react';
+import { UploadCloud, ChevronRight, FileSearch, Fingerprint, Network } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import type { InvoiceListItem } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatTimeAgo } from '../utils/formatters';
 
 export const UploadPage = () => {
   const { mutate: uploadInvoice, isPending } = useUploadInvoice();
@@ -25,98 +23,99 @@ export const UploadPage = () => {
   });
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 font-sans">
+    <div className="max-w-3xl mx-auto flex flex-col gap-10 pb-20">
       
-      {/* Upload Column */}
-      <div className="lg:col-span-2 space-y-6">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-3xl font-bold tracking-tight text-gray-900">Upload Invoice</h2>
-          <p className="text-gray-500">Securely ingest PDFs or images for intelligent processing.</p>
-        </div>
-
-        <Card className="shadow-sm border-0 ring-1 ring-gray-200 overflow-hidden">
-          <CardContent className="p-0 bg-slate-50/50">
-            <FileDropzone onUpload={handleUpload} isUploading={isPending} />
-          </CardContent>
-        </Card>
-
-        {/* Recent Uploads block */}
-        <Card className="shadow-sm border-0 ring-1 ring-gray-200 mt-8">
-          <CardHeader className="border-b border-gray-100 pb-4">
-            <CardTitle className="text-lg">Recent Uploads</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {!recentInvoices?.items?.length ? (
-              <div className="p-6 text-center text-gray-500 text-sm">No recent uploads.</div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {recentInvoices.items.map((inv: InvoiceListItem) => (
-                  <div key={inv.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col gap-1 overflow-hidden">
-                      <span className="font-medium text-gray-900 truncate max-w-[200px] sm:max-w-xs">{inv.original_filename}</span>
-                      <span className="text-xs text-gray-500">{formatDate(inv.created_at)}</span>
-                    </div>
-                    <div className="flex items-center gap-4 shrink-0">
-                      <span className="text-sm font-semibold text-gray-700 hidden sm:block">
-                        {formatCurrency(inv.total_amount)}
-                      </span>
-                      <StatusBadge status={inv.status} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="text-center pt-4">
+         <h1 className="text-3xl font-bold tracking-tight text-ink-900 mb-2">Ingest Documents</h1>
+         <p className="text-ink-500 font-medium">Securely upload e-Invoices or PDF documents for intelligent extraction.</p>
       </div>
 
-      {/* Info Column */}
-      <div className="lg:col-span-1 space-y-6 lg:mt-14">
-        <Card className="shadow-sm border-0 ring-1 ring-gray-200 bg-gradient-to-b from-white to-slate-50">
-          <CardHeader>
-            <CardTitle className="text-lg">How it works</CardTitle>
-            <CardDescription>InvoiceAI processes documents in real-time securely.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
+      <div>
+         <FileDropzone onUpload={handleUpload} isUploading={isPending} />
+      </div>
+
+      {/* How it works - Horizontal Flow */}
+      <div className="pt-2">
+         <h3 className="text-[10px] font-bold text-ink-400 uppercase tracking-widest text-center mb-6">Processing Pipeline</h3>
+         
+         <div className="flex items-center justify-between gap-2 max-w-xl mx-auto relative">
+            <div className="flex flex-col items-center flex-1 z-10">
+               <div className="w-12 h-12 bg-white rounded-full border border-ink-200 shadow-sm flex items-center justify-center mb-3 text-indigo-500 relative">
+                  <FileSearch className="w-5 h-5" />
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-ink-900 text-white rounded-full flex items-center justify-center text-[9px] font-bold">1</span>
+               </div>
+               <span className="text-[11px] font-bold text-ink-900 uppercase tracking-wider text-center">Scan</span>
+               <span className="text-[10px] font-semibold text-ink-400 text-center mt-0.5">Detect e-Invoice QR</span>
+            </div>
             
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
-                <FileSearch className="h-5 w-5" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <h4 className="font-semibold text-gray-900">QR Detection</h4>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  First, we scan for standard e-Invoice QR codes ensuring 100% data extraction without hallucination risks.
-                </p>
-              </div>
+            <div className="text-ink-300 shrink-0 mt-[-24px]"><ChevronRight className="w-5 h-5" /></div>
+
+            <div className="flex flex-col items-center flex-1 z-10">
+               <div className="w-12 h-12 bg-white rounded-full border border-ink-200 shadow-sm flex items-center justify-center mb-3 text-sky-500 relative">
+                  <Fingerprint className="w-5 h-5" />
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-ink-900 text-white rounded-full flex items-center justify-center text-[9px] font-bold">2</span>
+               </div>
+               <span className="text-[11px] font-bold text-ink-900 uppercase tracking-wider text-center">Extract</span>
+               <span className="text-[10px] font-semibold text-ink-400 text-center mt-0.5">Azure AI Visual OCR</span>
             </div>
 
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
-                <ServerCog className="h-5 w-5" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <h4 className="font-semibold text-gray-900">Azure AI Processing</h4>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  Fallback items undergo Microsoft Document Intelligence extraction for advanced OCR matching.
-                </p>
-              </div>
-            </div>
+            <div className="text-ink-300 shrink-0 mt-[-24px]"><ChevronRight className="w-5 h-5" /></div>
 
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <h4 className="font-semibold text-gray-900">Confidence Routing</h4>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  Invoices below confidence thresholds are natively paused and pushed directly into your Review Queue for human validation.
-                </p>
-              </div>
+            <div className="flex flex-col items-center flex-1 z-10">
+               <div className="w-12 h-12 bg-white rounded-full border border-ink-200 shadow-sm flex items-center justify-center mb-3 text-emerald-500 relative">
+                  <Network className="w-5 h-5" />
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-ink-900 text-white rounded-full flex items-center justify-center text-[9px] font-bold">3</span>
+               </div>
+               <span className="text-[11px] font-bold text-ink-900 uppercase tracking-wider text-center">Route</span>
+               <span className="text-[10px] font-semibold text-ink-400 text-center mt-0.5">Smart validation</span>
             </div>
+         </div>
+      </div>
 
-          </CardContent>
-        </Card>
+      {/* Recent Uploads block */}
+      <div className="mt-4 flex flex-col gap-4">
+         <h3 className="text-sm font-bold text-ink-900 tracking-tight">Recent Activity</h3>
+         
+         <div className="bg-white rounded-2xl border border-ink-200 shadow-sm overflow-hidden flex flex-col">
+          {!recentInvoices?.items?.length ? (
+            <div className="p-12 flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 bg-ink-50 rounded-full flex items-center justify-center mb-4">
+                 <UploadCloud className="w-8 h-8 text-ink-300" />
+              </div>
+              <h4 className="font-bold text-ink-900">No uploads yet</h4>
+              <p className="text-sm font-medium text-ink-500 mt-1">Files you process will appear here in chronological order.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-ink-100">
+              {recentInvoices.items.map((inv: InvoiceListItem) => (
+                <div key={inv.id} className="p-4 flex items-center justify-between hover:bg-ink-50 transition-colors">
+                  
+                  <div className="flex items-center gap-4 min-w-0 pr-4">
+                     <StatusBadge status={inv.status} />
+                     <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="font-semibold text-ink-900 text-sm truncate max-w-[150px] sm:max-w-xs" title={inv.original_filename}>
+                          {inv.original_filename}
+                        </span>
+                        <span className="text-[11px] font-medium text-ink-500 truncate mt-0.5" title={inv.vendor_name || 'Unknown Vendor'}>
+                          {inv.vendor_name || '—'}
+                        </span>
+                     </div>
+                  </div>
+
+                  <div className="flex items-center gap-6 shrink-0">
+                    <span className="text-sm font-mono font-bold text-ink-900 text-right hidden sm:block">
+                      {formatCurrency(inv.total_amount)}
+                    </span>
+                    <span className="text-xs font-semibold text-ink-400 text-right min-w-[70px]">
+                      {formatTimeAgo(inv.created_at)}
+                    </span>
+                  </div>
+                  
+                </div>
+              ))}
+            </div>
+          )}
+         </div>
       </div>
 
     </div>

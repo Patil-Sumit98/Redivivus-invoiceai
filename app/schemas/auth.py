@@ -7,12 +7,6 @@ class UserCreate(BaseModel):
     password: str
 
 
-class LoginRequest(BaseModel):
-    """Kept for backward compatibility, but login now uses OAuth2PasswordRequestForm."""
-    email: EmailStr
-    password: str
-
-
 class UserResponse(BaseModel):
     id: str
     email: str

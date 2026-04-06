@@ -11,7 +11,7 @@ from app.database import get_db, SessionLocal
 from app.models.user import User
 from app.models.invoice import Invoice
 from app.middleware.auth import get_current_user
-from app.middleware.rate_limit import check_rate_limit
+from app.middleware.rate_limit import rate_limited_user
 from app.services.blob_storage import upload_file_to_blob
 from app.services.azure_ai import analyze_invoice
 from app.services.invoice_mapper import map_fields, map_gst_qr_to_canonical
@@ -40,7 +40,8 @@ def _validate_file_magic(file_bytes: bytes, ext: str) -> bool:
     return any(file_bytes[:len(sig)] == sig for sig in sigs)
 
 
-def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str):
+def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str, blob_url: str):
+    """BUG-23: blob_url is pre-uploaded by the endpoint to free memory sooner."""
     import time
     logger = logging.getLogger(__name__)
     start_time = time.monotonic()
@@ -48,11 +49,11 @@ def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str):
     try:
         logger.info(f"[invoice:{invoice_id}] Processing started")
 
-        # STEP 1: QR Detection (try first — zero AI cost)
         from app.services.qr_detector import detect_gst_qr
         from app.services.confidence_engine import compute_confidence
         from app.services.gst_rules import run_gst_rules
 
+        # STEP 1: QR Detection (try first — zero AI cost)
         qr_data = detect_gst_qr(file_bytes, filename)
 
         if qr_data:
@@ -60,11 +61,9 @@ def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str):
             mapped_data = map_gst_qr_to_canonical(qr_data)
             source_type = "GST_EINVOICE"
             ingestion_method = "QR"
-            file_url = upload_file_to_blob(file_bytes, filename)
         else:
             logger.info(f"[invoice:{invoice_id}] No QR — sending to Azure AI OCR")
-            file_url = upload_file_to_blob(file_bytes, filename)
-            raw_fields = analyze_invoice(file_url)
+            raw_fields = analyze_invoice(blob_url)
             mapped_data = map_fields(raw_fields)
             source_type = "GST_PDF"
             ingestion_method = "OCR"
@@ -79,7 +78,7 @@ def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str):
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if invoice:
-            invoice.file_url = file_url
+            invoice.file_url = blob_url
             invoice.data_json = mapped_data
             invoice.confidence = conf_result["overall_score"]
             invoice.status = conf_result["status"]
@@ -113,7 +112,7 @@ async def upload_invoice(
     file: UploadFile = File(...),
     x_idempotency_key: str = Header(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(check_rate_limit),
+    current_user: User = Depends(rate_limited_user),
 ):
     import os
 
@@ -156,6 +155,8 @@ async def upload_invoice(
             detail="File content does not match the claimed extension. Possible corrupted or disguised file.",
         )
 
+    from sqlalchemy.exc import IntegrityError
+
     new_invoice = Invoice(
         user_id=current_user.id,
         status="processing",
@@ -164,15 +165,35 @@ async def upload_invoice(
         source_type="UNKNOWN",
         ingestion_method="PENDING",
     )
-    db.add(new_invoice)
-    db.commit()
-    db.refresh(new_invoice)
+
+    # BUG-08: Handle race condition on idempotency key
+    try:
+        db.add(new_invoice)
+        db.commit()
+        db.refresh(new_invoice)
+    except IntegrityError:
+        db.rollback()
+        # Re-fetch the existing invoice that won the race
+        existing = db.query(Invoice).filter(
+            Invoice.user_id == current_user.id,
+            Invoice.idempotency_key == hashed_key,
+        ).first()
+        if existing:
+            return JSONResponse(
+                status_code=200,
+                content={"id": existing.id, "status": existing.status},
+            )
+        raise HTTPException(status_code=500, detail="Unexpected conflict during upload.")
+
+    # BUG-23: Upload to blob here so file_bytes can be GC'd sooner
+    blob_url = upload_file_to_blob(file_bytes, file.filename)
 
     background_tasks.add_task(
         process_invoice_task,
         invoice_id=new_invoice.id,
         file_bytes=file_bytes,
         filename=file.filename,
+        blob_url=blob_url,
     )
 
     return {
@@ -222,22 +243,55 @@ def get_stats(
     }
 
 
+# BUG-18: Safe extraction from data_json that handles non-dict or corrupted values
+def _safe_get(data_json, field):
+    if not isinstance(data_json, dict):
+        return None
+    field_data = data_json.get(field, {})
+    if isinstance(field_data, dict):
+        return field_data.get("value")
+    return None
+
+
 @router.get("/")
 def list_invoices(
     skip: int = 0,
     limit: int = 20,
+    status: str = None,
+    search: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # BUG-17: Server-side filtering instead of client-side over 1000 records
+    query = db.query(Invoice).filter(Invoice.user_id == current_user.id)
+
+    if status and status != "All":
+        status_map = {
+            "Processing": ["processing"],
+            "Auto-Approved": ["AUTO_APPROVED", "completed", "VERIFIED"],
+            "Needs Review": ["NEEDS_REVIEW", "HUMAN_REQUIRED"],
+            "Failed": ["failed", "REJECTED"],
+        }
+        status_values = status_map.get(status, [status])
+        query = query.filter(Invoice.status.in_(status_values))
+
+    # Search by vendor name or invoice number (server-side)
+    if search and search.strip():
+        search_term = f"%{search.strip()}%"
+        # Since vendor_name is inside JSON, we do a broad text search on data_json
+        query = query.filter(
+            Invoice.original_filename.ilike(search_term)
+        )
+
+    total = query.count()
+
     invoices = (
-        db.query(Invoice)
-        .filter(Invoice.user_id == current_user.id)
+        query
         .order_by(Invoice.created_at.desc())
         .offset(skip)
         .limit(limit)
         .all()
     )
-    total = db.query(Invoice).filter(Invoice.user_id == current_user.id).count()
 
     return {
         "items": [
@@ -247,9 +301,11 @@ def list_invoices(
                 "original_filename": inv.original_filename,
                 "created_at": inv.created_at,
                 "confidence_score": inv.confidence,
-                "vendor_name": inv.data_json.get("vendor_name", {}).get("value") if inv.data_json else None,
-                "total_amount": inv.data_json.get("total_amount", {}).get("value") if inv.data_json else None,
-                "invoice_number": inv.data_json.get("invoice_number", {}).get("value") if inv.data_json else None,
+                "vendor_name": _safe_get(inv.data_json, "vendor_name"),
+                "total_amount": _safe_get(inv.data_json, "total_amount"),
+                "invoice_number": _safe_get(inv.data_json, "invoice_number"),
+                "ingestion_method": inv.ingestion_method,
+                "source_type": inv.source_type,
             }
             for inv in invoices
         ],
@@ -350,6 +406,7 @@ def reprocess_invoice(
 
             inv = _db.query(Invoice).filter(Invoice.id == inv_id).first()
             if inv:
+                inv.raw_json = str(raw_fields)  # BUG-14: Update raw_json so UI Raw JSON tab is fresh
                 inv.data_json = mapped_data
                 inv.confidence = conf_result["overall_score"]
                 inv.status = conf_result["status"]

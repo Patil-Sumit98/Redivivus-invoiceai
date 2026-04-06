@@ -38,12 +38,32 @@ export const useAuthStore = create<AuthState>((set) => ({
   initFromStorage: () => {
     const token = localStorage.getItem('invoiceai_token');
     const userStr = localStorage.getItem('invoiceai_user');
+
+    // BUG-16: Validate JWT expiry before trusting the stored token
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const isExpired = payload.exp && (payload.exp * 1000) < Date.now();
+        if (isExpired) {
+          localStorage.removeItem('invoiceai_token');
+          localStorage.removeItem('invoiceai_user');
+          set({ token: null, user: null, isAuthenticated: false });
+          return;
+        }
+      } catch {
+        // Invalid token format — clear it
+        localStorage.removeItem('invoiceai_token');
+        localStorage.removeItem('invoiceai_user');
+        set({ token: null, user: null, isAuthenticated: false });
+        return;
+      }
+    }
+
     let user = null;
-    
     if (userStr) {
       try {
         user = JSON.parse(userStr);
-      } catch (e) {
+      } catch {
         // suppress
       }
     }

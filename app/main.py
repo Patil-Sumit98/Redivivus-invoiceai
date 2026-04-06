@@ -93,7 +93,11 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    """Catch-all: return correlation ID, log full traceback."""
+    """Catch-all: return correlation ID, log full traceback.
+    BUG-33: Skip HTTPException — let FastAPI handle those natively."""
+    from fastapi import HTTPException as _HTTPException
+    if isinstance(exc, _HTTPException):
+        raise exc
     correlation_id = str(uuid.uuid4())[:8]
     logger.error(f"[{correlation_id}] Unhandled error: {exc}", exc_info=True)
     return JSONResponse(
