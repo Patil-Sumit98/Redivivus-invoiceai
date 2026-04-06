@@ -3,6 +3,7 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import case
 
 from app.database import get_db
 from app.models.user import User
@@ -37,7 +38,20 @@ def get_review_queue(
     )
 
     total = query.count()
-    invoices = query.order_by(Invoice.created_at.desc()).offset(skip).limit(limit).all()
+
+    # BUG-34: Sort by priority — HUMAN_REQUIRED first, then NEEDS_REVIEW, then by date
+    priority_order = case(
+        (Invoice.status == "HUMAN_REQUIRED", 0),
+        (Invoice.status == "NEEDS_REVIEW", 1),
+        else_=2,
+    )
+    invoices = (
+        query
+        .order_by(priority_order, Invoice.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     items = []
     for inv in invoices:
@@ -54,7 +68,6 @@ def get_review_queue(
             "gst_flags": flags,
         })
 
-    # Fix #11: include total_pending so frontend ReviewQueuePage can display it
     return {
         "items": items,
         "total": total,
@@ -92,6 +105,15 @@ def submit_review(
     if payload.action == "APPROVED":
         new_status = "VERIFIED"
         new_ingestion = "HUMAN"
+        # BUG-27: Document that human approved data as-is (distinct from before_data)
+        after_data = {
+            **(invoice.data_json or {}),
+            "_review_metadata": {
+                "action": "APPROVED",
+                "reviewer_id": current_user.id,
+                "note": "Data approved by human reviewer without changes.",
+            },
+        }
     elif payload.action == "REJECTED":
         new_status = "REJECTED"
     elif payload.action == "EDITED":
@@ -124,7 +146,6 @@ def submit_review(
         f"action={payload.action} status_updated={new_status}"
     )
 
-    # Fix #12: Return a serializable dict, not a raw SQLAlchemy model
     return {
         "id": invoice.id,
         "status": invoice.status,

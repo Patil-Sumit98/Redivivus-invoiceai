@@ -57,9 +57,10 @@ def deliver_webhook_sync(delivery_id: str):
     max_attempts = 3
     retry_delay = 5  # seconds
 
-    for attempt in range(max_attempts):
-        db = SessionLocal()
-        try:
+    # BUG-13: Single DB session for all retry attempts — prevents connection pool exhaustion
+    db = SessionLocal()
+    try:
+        for attempt in range(max_attempts):
             delivery = db.query(WebhookDelivery).filter(WebhookDelivery.id == delivery_id).first()
             if not delivery:
                 logger.error(f"[webhook] Delivery {delivery_id} not found.")
@@ -151,11 +152,10 @@ def deliver_webhook_sync(delivery_id: str):
             else:
                 return
 
-        except Exception as e:
-            logger.error(f"[webhook] Critical error processing delivery {delivery_id}: {e}", exc_info=True)
-            return
-        finally:
-            db.close()
+    except Exception as e:
+        logger.error(f"[webhook] Critical error processing delivery {delivery_id}: {e}", exc_info=True)
+    finally:
+        db.close()
 
 
 def deliver_webhook(delivery_id: str):

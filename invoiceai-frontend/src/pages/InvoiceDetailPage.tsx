@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useInvoiceStatus } from '../hooks/useInvoiceStatus';
-import { ConfidenceBar } from '../components/ConfidenceBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { GSTRulesPanel } from '../components/GSTRulesPanel';
 import { LineItemsTable } from '../components/LineItemsTable';
 import { formatDate, formatCurrency } from '../utils/formatters';
-import { Card, CardContent } from '../components/ui/card';
-import { AlertTriangle, Copy, Check, FileText, ArrowRight } from 'lucide-react';
+import { AlertTriangle, Copy, Check, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const InvoiceDetailPage = () => {
@@ -18,17 +16,15 @@ export const InvoiceDetailPage = () => {
   const [copied, setCopied] = useState(false);
 
   if (isLoading) {
-    return <div className="flex h-[50vh] items-center justify-center text-gray-500 font-medium">Loading invoice details...</div>;
+    return <div className="flex h-[80vh] items-center justify-center text-ink-500 font-medium">Loading source context...</div>;
   }
 
   if (error || !invoice) {
-    return <div className="flex h-[50vh] items-center justify-center text-red-500 font-medium">Failed to load invoice details.</div>;
+    return <div className="flex h-[80vh] items-center justify-center text-red-500 font-medium">Failed to retrieve ledger record.</div>;
   }
 
-  // Fix #21: Backend returns both "data" and "data_json" — use whichever is available
   const data = invoice.data_json || (invoice as any).data;
-  // GST rules may be nested inside data or at invoice top level
-  const gstRulesJson = (invoice as any).gst_rules_json || data?.gst_rules_json;
+  const gstRulesJson = invoice.gst_rules_json || (invoice as any).data?.gst_rules_json;
 
   const handleCopyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(invoice, null, 2));
@@ -38,13 +34,28 @@ export const InvoiceDetailPage = () => {
   };
 
   const renderField = (label: string, field: any, isCurrency = false) => {
-    const isLowConfidence = field?.confidence !== undefined && field.confidence < 0.60;
-    const valueStr = isCurrency ? formatCurrency(field?.value) : (field?.value || '-');
+    const isLowConfidence = field?.confidence !== undefined && field.confidence < 0.60 && field.confidence !== null;
+    const valueStr = isCurrency ? formatCurrency(field?.value) : (field?.value || '—');
+    const scorePct = field?.confidence !== undefined && field.confidence !== null ? Math.round(field.confidence * 100) : null;
+    
+    let confColor = 'bg-ink-300';
+    if (scorePct !== null) {
+       if (scorePct >= 90) confColor = 'bg-green-500';
+       else if (scorePct >= 60) confColor = 'bg-amber-500';
+       else confColor = 'bg-red-500';
+    }
+
     return (
-      <div className={`p-3 rounded-md transition-colors ${isLowConfidence ? 'bg-red-50 ring-1 ring-red-200 shadow-sm' : 'bg-gray-50'}`}>
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
-        <p className={`font-semibold mt-1 mb-2 ${isLowConfidence ? 'text-red-900' : 'text-gray-900'}`}>{valueStr}</p>
-        <ConfidenceBar score={field?.confidence} />
+      <div className={`p-3 rounded-lg border ${isLowConfidence ? 'bg-red-50 border-red-200' : 'bg-white border-ink-200 shadow-sm'}`}>
+        <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">{label}</span>
+        <p className={`font-semibold mt-0.5 mb-2 truncate ${isLowConfidence ? 'text-red-900' : 'text-ink-900'}`} title={valueStr}>{valueStr}</p>
+        
+        {/* Compact Bar */}
+        {scorePct !== null && (
+          <div className="w-full bg-ink-100 rounded-full h-1 overflow-hidden">
+            <div className={`h-full ${confColor} transition-all`} style={{ width: `${scorePct}%` }} />
+          </div>
+        )}
       </div>
     );
   };
@@ -52,152 +63,176 @@ export const InvoiceDetailPage = () => {
   const isReviewNeeded = ['NEEDS_REVIEW', 'HUMAN_REQUIRED'].includes(invoice.status?.toUpperCase() || '');
   const fileUrl = invoice.file_url && invoice.file_url.startsWith('http') ? invoice.file_url : `http://localhost:8000${invoice.file_url}`;
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
+  
+  // Overall Confidence Ring
+  const ovScore = invoice.confidence_score !== null && invoice.confidence_score !== undefined ? Math.round(invoice.confidence_score * 100) : null;
+  let ovRingColor = 'stroke-ink-200 text-ink-300';
+  if (ovScore !== null) {
+      if (ovScore >= 90) ovRingColor = 'stroke-green-500 text-green-500';
+      else if (ovScore >= 60) ovRingColor = 'stroke-amber-500 text-amber-500';
+      else ovRingColor = 'stroke-red-500 text-red-500';
+  }
+
+  const isQR = (invoice as any).ingestion_method === 'QR' || (invoice as any).source_type === 'GST_EINVOICE';
+  const isOCR = (invoice as any).ingestion_method === 'OCR' || (invoice as any).source_type === 'GST_PDF';
 
   return (
-    <div className="flex flex-col h-full space-y-6 pb-24">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200 pb-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-3">
-            <FileText className="text-blue-600 h-6 w-6 shrink-0" />
-            <span className="truncate max-w-sm md:max-w-xl">{invoice.original_filename}</span>
-          </h2>
-          <p className="text-sm font-medium text-gray-500 mt-1 ml-9">Uploaded {formatDate(invoice.created_at)}</p>
+    <div className={`flex flex-col lg:flex-row h-full min-h-[85vh] gap-6 lg:gap-8 ${isReviewNeeded ? 'pb-24' : ''}`}>
+      
+      {/* LEFT COLUMN: Original Doc */}
+      <div className="lg:w-[40%] bg-ink-100 rounded-xl overflow-hidden flex flex-col ring-1 ring-ink-200">
+        <div className="bg-ink-100 border-b border-ink-200 px-4 py-3 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-sm text-ink-900 tracking-tight">Source Document</h3>
+          {isQR ? (
+             <span className="bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">QR Code</span>
+          ) : isOCR ? (
+             <span className="bg-sky-100 text-sky-700 border border-sky-200 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">AI OCR</span>
+          ) : null}
         </div>
-        <StatusBadge status={invoice.status} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full min-h-[700px]">
-        {/* Left Column: Original File (iframe or img) */}
-        <Card className="shadow-sm border-0 ring-1 ring-gray-200 overflow-hidden flex flex-col bg-white">
-          <div className="bg-slate-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10">
-            <h3 className="font-semibold text-sm text-gray-700 tracking-tight">Original Document Source</h3>
-          </div>
-          <CardContent className="p-0 flex-1 bg-gray-100/50 flex items-center justify-center min-h-[500px] lg:min-h-[700px]">
-             {isPDF ? (
-               <iframe src={fileUrl} className="w-full h-full min-h-[700px] border-0" title="PDF Viewer" />
-             ) : (
-               <div className="w-full h-full overflow-auto p-4 flex items-center justify-center">
-                 <img src={fileUrl} alt="Invoice Document" className="max-w-full max-h-[800px] object-contain shadow-sm ring-1 ring-gray-200 rounded-sm bg-white" />
-               </div>
-             )}
-          </CardContent>
-        </Card>
-
-        {/* Right Column: Extracted Values */}
-        <div className="flex flex-col gap-4">
-          
-          {/* Custom Native Tailwind Tabs */}
-          <div className="flex space-x-1 bg-slate-200/60 p-1 rounded-lg shrink-0">
-            {(['data', 'gst', 'items', 'json'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-2.5 text-sm font-semibold rounded-md transition-all
-                  ${activeTab === tab ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-200/50' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-300/40'}`}
-              >
-                {tab === 'data' && 'Invoice Data'}
-                {tab === 'gst' && 'GST Validation'}
-                {tab === 'items' && 'Line Items'}
-                {tab === 'json' && 'Raw JSON'}
-              </button>
-            ))}
-          </div>
-
-          <Card className="shadow-sm border-0 ring-1 ring-gray-200 flex-1 overflow-hidden flex flex-col bg-white">
-             <CardContent className="p-0 flex-1 overflow-y-auto custom-scrollbar">
-                
-                {/* Tab: DATA */}
-                {activeTab === 'data' && (
-                  <div className="p-6 animate-in fade-in duration-300">
-                    <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
-                       <h3 className="text-lg font-bold tracking-tight text-gray-900">Extracted Key Values</h3>
-                       <span className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${data?.metadata?.ingestion_method === 'QR' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-100 text-indigo-800'}`}>
-                          {data?.metadata?.ingestion_method === 'QR' ? 'QR Code Scanned' : 'Azure AI Visually Parsed'}
-                       </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                       <div className="sm:col-span-2">{renderField('Vendor Name', data?.vendor_name)}</div>
-                       {renderField('Vendor GSTIN', data?.vendor_gstin)}
-                       {renderField('Buyer GSTIN', data?.buyer_gstin)}
-                       {renderField('Invoice Number', data?.invoice_number)}
-                       {renderField('Invoice Date', data?.invoice_date)}
-                       
-                       <div className="sm:col-span-2 border-t border-gray-200 pt-6 mt-4">
-                           <h4 className="text-sm font-bold text-gray-400 mb-4 uppercase tracking-widest">Calculated Subtotals</h4>
-                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                             {renderField('Subtotal', data?.subtotal, true)}
-                             {renderField('CGST', data?.cgst, true)}
-                             {renderField('SGST', data?.sgst, true)}
-                             {renderField('IGST', data?.igst, true)}
-                           </div>
-                       </div>
-                       <div className="sm:col-span-2 mt-4 bg-blue-50/50 p-4 rounded-lg border border-blue-100">
-                         {renderField('Total Amount', data?.total_amount, true)}
-                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Tab: GST */}
-                {activeTab === 'gst' && (
-                  <div className="p-6 animate-in fade-in duration-300">
-                    <h3 className="text-lg font-bold tracking-tight text-gray-900 mb-6 pb-4 border-b border-gray-100">Automated Ruleset Execution</h3>
-                    <GSTRulesPanel gstData={gstRulesJson} />
-                  </div>
-                )}
-
-                {/* Tab: ITEMS */}
-                {activeTab === 'items' && (
-                  <div className="p-6 animate-in fade-in duration-300">
-                    <h3 className="text-lg font-bold tracking-tight text-gray-900 mb-6 pb-4 border-b border-gray-100">Parsed Line Items</h3>
-                    <LineItemsTable items={data?.line_items} />
-                  </div>
-                )}
-
-                {/* Tab: JSON */}
-                {activeTab === 'json' && (
-                  <div className="p-6 animate-in fade-in duration-300 relative group h-full flex flex-col">
-                    <div className="flex items-center justify-between mb-4 shrink-0">
-                       <h3 className="text-lg font-bold tracking-tight text-gray-900">Developer Payload</h3>
-                       <button 
-                         onClick={handleCopyJson}
-                         className="flex items-center gap-2 text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-md transition-colors shadow-sm"
-                       >
-                         {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
-                         {copied ? 'Payload Copied!' : 'Copy Schema'}
-                       </button>
-                    </div>
-                    <div className="bg-slate-950 text-emerald-400 p-5 rounded-lg overflow-auto text-[13px] font-mono flex-1 shadow-inner ring-1 ring-slate-800">
-                      <pre className="whitespace-pre-wrap">{JSON.stringify(invoice, null, 2)}</pre>
-                    </div>
-                  </div>
-                )}
-
-             </CardContent>
-          </Card>
+        
+        <div className="flex-1 overflow-hidden bg-white/50 relative flex items-center justify-center p-2 min-h-[500px]">
+           {isPDF ? (
+             <iframe src={fileUrl} className="w-full h-full rounded shadow-inner" title="PDF Viewer" />
+           ) : (
+             <img src={fileUrl} alt="Invoice Document" className="max-w-full max-h-full object-contain rounded drop-shadow-sm" />
+           )}
+        </div>
+        
+        <div className="bg-ink-100 border-t border-ink-200 px-4 py-2 shrink-0 flex items-center justify-between">
+           <span className="text-xs font-medium text-ink-500 truncate max-w-[200px]" title={invoice.original_filename}>{invoice.original_filename}</span>
+           <span className="text-xs font-semibold text-ink-400">{formatDate(invoice.created_at)}</span>
         </div>
       </div>
 
-      {/* Review Banner Alert */}
-      {isReviewNeeded && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 md:left-64">
-           <div className="bg-amber-50 border-t-4 border-amber-400 text-amber-900 px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-2xl backdrop-blur-md">
-             <div className="flex items-center gap-4">
-                <div className="bg-amber-100 p-3 rounded-full shrink-0">
-                    <AlertTriangle className="h-7 w-7 text-amber-600" />
+      {/* RIGHT COLUMN: Data */}
+      <div className="lg:w-[60%] flex flex-col h-full gap-6">
+        
+        {/* Header */}
+        <div className="flex items-start justify-between bg-white p-5 rounded-xl border border-ink-200 shadow-sm shrink-0">
+           <div>
+               <h2 className="text-xl font-bold tracking-tight text-ink-900 truncate max-w-sm xl:max-w-md mb-2">
+                 {invoice.original_filename}
+               </h2>
+               <StatusBadge status={invoice.status} />
+           </div>
+           
+           <div className="flex flex-col items-center justify-center shrink-0 ml-4 border-l border-ink-100 pl-6">
+              <div className="relative w-12 h-12 flex items-center justify-center">
+                 <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+                   <circle cx="24" cy="24" r="20" fill="none" className="stroke-ink-100" strokeWidth="4" />
+                   {ovScore !== null && (
+                      <circle 
+                        cx="24" cy="24" r="20" fill="none" className={`transition-all duration-1000 ${ovRingColor.split(' ')[0]}`}
+                        strokeWidth="4" strokeDasharray="125.6" strokeDashoffset={125.6 - (125.6 * ovScore) / 100} strokeLinecap="round"
+                      />
+                   )}
+                 </svg>
+                 <span className={`text-[11px] font-black ${ovScore !== null ? ovRingColor.split(' ')[1] : 'text-ink-400'}`}>
+                   {ovScore !== null ? `${ovScore}%` : '—'}
+                 </span>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-ink-400 mt-1">Confidence</span>
+           </div>
+        </div>
+
+        {/* Segmented Control */}
+        <div className="flex space-x-1 bg-ink-100 p-1 rounded-lg w-fit shadow-inner shrink-0">
+          {(['data', 'gst', 'items', 'json'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all uppercase tracking-wider
+                ${activeTab === tab ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-700'}`}
+            >
+              {tab === 'data' && 'Invoice Data'}
+              {tab === 'gst' && 'GST Rules'}
+              {tab === 'items' && 'Line Items'}
+              {tab === 'json' && 'Raw JSON'}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 min-h-[400px]">
+           {activeTab === 'data' && (
+             <div className="space-y-6 animate-in fade-in duration-200">
+                {/* Vendors & Buyers */}
+                <div className="grid grid-cols-2 gap-4">
+                   {renderField('Vendor Name', data?.vendor_name)}
+                   {renderField('Vendor GSTIN', data?.vendor_gstin)}
+                   {renderField('Buyer Name', data?.buyer_name)}
+                   {renderField('Buyer GSTIN', data?.buyer_gstin)}
                 </div>
+                
+                {/* Invoice Details */}
+                <div className="grid grid-cols-3 gap-4">
+                   {renderField('Invoice Number', data?.invoice_number)}
+                   {renderField('Date', data?.invoice_date)}
+                   {renderField('Subtotal', data?.subtotal, true)}
+                </div>
+
+                {/* Taxes */}
+                <div className="grid grid-cols-3 gap-4">
+                   {renderField('CGST', data?.cgst, true)}
+                   {renderField('SGST', data?.sgst, true)}
+                   {renderField('IGST', data?.igst, true)}
+                </div>
+
+                {/* Total */}
+                <div className="bg-ink-950 p-6 rounded-xl flex items-center justify-between shadow-lg">
+                   <span className="text-ink-400 font-bold uppercase tracking-widest text-sm">Grand Total Amount</span>
+                   <span className="text-white text-4xl font-mono font-bold tracking-tight">
+                      {formatCurrency(data?.total_amount?.value !== null && data?.total_amount?.value !== undefined ? Number(data.total_amount.value) : null)}
+                   </span>
+                </div>
+             </div>
+           )}
+
+           {activeTab === 'gst' && (
+             <div className="animate-in fade-in duration-200">
+               <GSTRulesPanel gstData={gstRulesJson} />
+             </div>
+           )}
+
+           {activeTab === 'items' && (
+             <div className="animate-in fade-in duration-200">
+               <LineItemsTable items={data?.line_items} />
+             </div>
+           )}
+
+           {activeTab === 'json' && (
+             <div className="relative h-full min-h-[400px] flex flex-col bg-ink-950 rounded-xl overflow-hidden animate-in fade-in duration-200 shadow-inner">
+                <button 
+                  onClick={handleCopyJson}
+                  className="absolute top-4 right-4 p-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-md transition-colors shadow-sm ring-1 ring-white/10"
+                  title="Copy JSON"
+                >
+                  {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                </button>
+                <pre className="p-6 text-emerald-400 text-xs font-mono overflow-auto flex-1 custom-scrollbar whitespace-pre-wrap">
+                  {JSON.stringify(invoice, null, 2)}
+                </pre>
+             </div>
+           )}
+        </div>
+      </div>
+
+      {/* Manual Review Required Banner */}
+      {isReviewNeeded && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 md:left-[240px]">
+           <div className="bg-amber-50 border-t-2 border-amber-500 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]">
+             <div className="flex items-center gap-4">
+                <AlertTriangle className="h-6 w-6 text-amber-500 shrink-0" />
                 <div>
-                   <h4 className="font-extrabold text-lg tracking-tight">Manual Review Required</h4>
-                   <p className="text-sm font-medium text-amber-700/80 mt-0.5 max-w-2xl">This invoice requires human intervention due to low-confidence values or failed GST validation flags mathematically.</p>
+                   <h4 className="font-extrabold text-amber-900 tracking-tight text-sm">Manual verification required</h4>
+                   <p className="text-xs font-semibold text-amber-700/80 mt-0.5">Automated confidence constraint failed ({ovScore}%) or rule flagged.</p>
                 </div>
              </div>
              <button 
                 onClick={() => navigate('/review-queue')}
-                className="whitespace-nowrap shrink-0 flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg font-bold transition-all shadow-md hover:shadow-lg w-full sm:w-auto"
+                className="whitespace-nowrap bg-amber-500 hover:bg-amber-600 focus:ring-4 focus:ring-amber-500/20 text-white px-5 py-2.5 rounded-md font-bold transition-all shadow-sm text-xs uppercase tracking-wider"
              >
-                Open Review Terminal <ArrowRight className="h-5 w-5" />
+                Open Review Queue <ArrowRight className="h-4 w-4 inline-block ml-1" />
              </button>
            </div>
         </div>

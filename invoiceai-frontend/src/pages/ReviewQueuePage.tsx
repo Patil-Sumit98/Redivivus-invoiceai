@@ -1,83 +1,135 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useReviewQueue } from '../hooks/useReviewQueue';
 import { ReviewModal } from '../components/ReviewModal';
 import { StatusBadge } from '../components/StatusBadge';
-import { ConfidenceBar } from '../components/ConfidenceBar';
 import { formatTimeAgo } from '../utils/formatters';
-import { AlertCircle, FileText, ArrowRight, CheckCircle, Loader2 } from 'lucide-react';
-import { Card, CardContent } from '../components/ui/card';
+import { AlertCircle, FileText, CheckCircle, Loader2 } from 'lucide-react';
 
 export const ReviewQueuePage = () => {
   const { data, isLoading } = useReviewQueue();
   const [activeReviewId, setActiveReviewId] = useState<string | null>(null);
 
+  // Sort HUMAN_REQUIRED before NEEDS_REVIEW
+  const sortedItems = useMemo(() => {
+    if (!data?.items) return [];
+    return [...data.items].sort((a, b) => {
+      const aIsHuman = a.status === 'HUMAN_REQUIRED';
+      const bIsHuman = b.status === 'HUMAN_REQUIRED';
+      if (aIsHuman && !bIsHuman) return -1;
+      if (!aIsHuman && bIsHuman) return 1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [data]);
+
   return (
-    <div className="flex flex-col h-full space-y-6 pb-20">
+    <div className="max-w-7xl mx-auto flex flex-col h-full space-y-8 pb-20">
       
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200 pb-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-ink-200 pb-5">
         <div>
-           <h2 className="text-3xl font-bold tracking-tight text-gray-900">Human Review Terminal</h2>
-           <p className="text-sm font-medium text-gray-500 mt-1">Review flagged invoices that need manual verification.</p>
+           <h2 className="text-2xl font-bold tracking-tight text-ink-900">Review Queue</h2>
+           <p className="text-sm font-medium text-ink-500 mt-1">Resolve flagged anomalies and human-in-the-loop checkpoints.</p>
         </div>
-        <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-lg border border-amber-200 shadow-sm">
-           <AlertCircle className="h-5 w-5 text-amber-600" />
-           <span className="font-extrabold text-amber-900">{data?.total_pending || 0} Pending Documents</span>
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border shadow-sm ${data?.total_pending && data.total_pending > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-green-50 border-green-200 text-green-900'}`}>
+           {data?.total_pending && data.total_pending > 0 ? (
+             <AlertCircle className="h-5 w-5 text-amber-600" />
+           ) : (
+             <CheckCircle className="h-5 w-5 text-green-600" />
+           )}
+           <span className="font-extrabold">{data?.total_pending || 0} Pending</span>
         </div>
       </div>
 
-      <div className="grid gap-6">
+      <div className="grid gap-4">
          {isLoading ? (
-            <div className="p-12 flex flex-col items-center justify-center gap-4 text-center text-gray-500 font-semibold bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="p-16 flex flex-col items-center justify-center gap-4 text-center text-ink-500 font-semibold bg-white rounded-xl shadow-sm border border-ink-200">
                <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
                Fetching review queue...
             </div>
-         ) : !data?.items || data.items.length === 0 ? (
-            <Card className="shadow-sm border-0 ring-1 ring-gray-200 bg-white">
-               <CardContent className="p-16 flex flex-col items-center justify-center gap-4">
-                  <div className="p-5 bg-emerald-50 rounded-full">
-                     <CheckCircle className="h-14 w-14 text-emerald-500" />
-                  </div>
-                  <h3 className="text-2xl font-black text-gray-900 mt-2">Review Queue Empty!</h3>
-                  <p className="text-gray-500 font-semibold text-sm">All invoices have been reviewed successfully.</p>
-               </CardContent>
-            </Card>
+         ) : !sortedItems || sortedItems.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border border-ink-200 p-20 flex flex-col items-center justify-center gap-5">
+               <div className="p-6 bg-green-50 rounded-full flex items-center justify-center shadow-inner">
+                  <CheckCircle className="h-16 w-16 text-green-500" />
+               </div>
+               <div className="text-center">
+                  <h3 className="text-2xl font-black text-ink-900 tracking-tight">Queue is clear</h3>
+                  <p className="text-ink-500 font-medium text-sm mt-2">All invoices have been verified or are processing.</p>
+               </div>
+            </div>
          ) : (
             <div className="grid grid-cols-1 gap-4">
-               {data.items.map(item => (
-                  <div 
-                    key={item.id}
-                    onClick={() => setActiveReviewId(item.id)}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 hover:border-amber-400 hover:shadow-md transition-all cursor-pointer p-5 flex flex-col md:flex-row md:items-center justify-between gap-6 group"
-                  >
-                     <div className="flex items-start gap-4">
-                         <div className="bg-slate-50 p-3.5 rounded-xl flex items-center justify-center ring-1 ring-slate-200 group-hover:bg-amber-50 group-hover:ring-amber-200 transition-colors shrink-0">
-                             <FileText className="h-7 w-7 text-slate-400 group-hover:text-amber-600 transition-colors" />
-                         </div>
-                         <div className="flex flex-col gap-1.5">
-                             <h4 className="font-bold text-gray-900 text-[15px] truncate max-w-sm">{item.original_filename}</h4>
-                             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">{formatTimeAgo(item.created_at)}</p>
-                         </div>
-                     </div>
-                     
-                     <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-10 shrink-0 border-t sm:border-0 border-gray-100 pt-4 sm:pt-0">
-                         <div className="flex flex-col items-start min-w-[200px]">
-                            <span className="text-[11px] font-bold text-gray-400 tracking-wider uppercase mb-2">Engine Confidence Level</span>
-                            <ConfidenceBar score={item.confidence_score} />
-                         </div>
-                         <div className="flex flex-col items-start min-w-[150px]">
-                            <span className="text-[11px] font-bold text-gray-400 tracking-wider uppercase mb-2">Target Status</span>
-                            <StatusBadge status={item.status} />
-                         </div>
-                         <div className="hidden lg:flex flex-col items-center justify-center bg-gray-50 px-5 py-2.5 rounded-lg border border-gray-100 shadow-inner">
-                            <span className="text-2xl font-black text-gray-900 leading-none">{item.gst_flags?.length || 0}</span>
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">GST Flags</span>
-                         </div>
-                         <button className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center group-hover:bg-amber-600 group-hover:border-amber-600 transition-all shadow-sm shrink-0 group-hover:scale-105">
-                            <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-white transition-colors" />
-                         </button>
-                     </div>
-                  </div>
-               ))}
+               {sortedItems.map(item => {
+                  const isHumanRequired = item.status === 'HUMAN_REQUIRED';
+                  const borderClass = isHumanRequired ? 'border-l-red-500' : 'border-l-amber-500';
+                  
+                  // Compute simple block confidence bar
+                  const confVal = item.confidence_score !== null && item.confidence_score !== undefined ? Math.round(item.confidence_score * 100) : null;
+                  let confColor = 'bg-ink-200';
+                  if (confVal !== null) {
+                    if (confVal >= 90) confColor = 'bg-green-500';
+                    else if (confVal >= 60) confColor = 'bg-amber-500';
+                    else confColor = 'bg-red-500';
+                  }
+
+                  const firstFewFlags = item.gst_flags?.slice(0, 2) || [];
+                  const extraFlags = (item.gst_flags?.length || 0) - firstFewFlags.length;
+
+                  return (
+                    <div 
+                      key={item.id}
+                      onClick={() => setActiveReviewId(item.id)}
+                      className={`relative bg-white rounded-xl shadow-sm border border-ink-200 border-l-[4px] ${borderClass} hover:border-ink-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer p-6 flex flex-col gap-5 group`}
+                    >
+                       {/* Top Row */}
+                       <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                             <StatusBadge status={item.status} />
+                             <h4 className="font-bold text-ink-900 text-[15px] flex items-center gap-2">
+                               <FileText className="h-4 w-4 text-ink-400" />
+                               {item.original_filename}
+                             </h4>
+                          </div>
+                          <span className="text-xs font-semibold text-ink-500 bg-ink-50 px-2.5 py-1 rounded-md">
+                            {formatTimeAgo(item.created_at)}
+                          </span>
+                       </div>
+                       
+                       {/* Middle: Confidence & Flag Count */}
+                       <div className="flex items-center gap-4 bg-ink-50/50 p-4 rounded-lg border border-ink-100">
+                           <div className="flex-1 flex items-center gap-3">
+                              <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider w-20 shrink-0">Confidence:</span>
+                              <div className="flex-1 h-2 bg-ink-200 rounded-full overflow-hidden max-w-[200px]">
+                                 {confVal !== null && (
+                                   <div className={`h-full ${confColor}`} style={{ width: `${confVal}%` }} />
+                                 )}
+                              </div>
+                              <span className="text-xs font-bold text-ink-900 w-8">{confVal !== null ? `${confVal}%` : '—'}</span>
+                           </div>
+
+                           <div className="hidden sm:flex items-center gap-2 border-l border-ink-200 pl-4">
+                              <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Flags:</span>
+                              <span className="text-sm font-black text-ink-900">{item.gst_flags?.length || 0}</span>
+                           </div>
+                       </div>
+
+                       {/* Bottom Row: Flags */}
+                       {item.gst_flags && item.gst_flags.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                             {firstFewFlags.map((flag, idx) => (
+                               <div key={idx} className="flex items-center gap-1.5 text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">
+                                  <AlertCircle className="h-3 w-3" />
+                                  <span>{flag}</span>
+                               </div>
+                             ))}
+                             {extraFlags > 0 && (
+                               <span className="text-[11px] font-bold text-ink-500">+{extraFlags} more</span>
+                             )}
+                          </div>
+                       )}
+
+                    </div>
+                  );
+               })}
             </div>
          )}
       </div>

@@ -9,6 +9,8 @@ export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({ score }) => {
     return <span className="text-gray-400 text-xs">-</span>;
   }
 
+  // BUG-28: Use integer display — Math.round already discarded decimals,
+  // so .toFixed(1) was showing misleading "85.0%"
   const scorePct = Math.round(score * 100);
   
   let colorClass = 'bg-red-500';
@@ -27,7 +29,7 @@ export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({ score }) => {
         />
       </div>
       <span className="text-xs font-medium text-gray-700 min-w-[36px] text-right">
-        {scorePct.toFixed(1)}%
+        {scorePct}%
       </span>
     </div>
   );

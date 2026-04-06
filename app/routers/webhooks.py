@@ -1,7 +1,8 @@
 from typing import List, Optional
 import hashlib
+import asyncio
 from pydantic import BaseModel, HttpUrl
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -55,6 +56,7 @@ def register_webhook(
         "created_at": str(new_hook.created_at),
     }
 
+# BUG-35: Return serializable dicts, not raw ORM objects
 @router.get("")
 def list_webhooks(
     db: Session = Depends(get_db),
@@ -64,7 +66,16 @@ def list_webhooks(
         Webhook.user_id == current_user.id,
         Webhook.is_active == True
     ).all()
-    return hooks
+    return [
+        {
+            "id": h.id,
+            "url": h.url,
+            "events": h.events,
+            "is_active": h.is_active,
+            "created_at": str(h.created_at),
+        }
+        for h in hooks
+    ]
 
 @router.delete("/{hook_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_webhook(
@@ -82,8 +93,9 @@ def delete_webhook(
     hook.is_active = False
     db.commit()
 
+# BUG-24: Made async and uses asyncio.to_thread to avoid blocking a worker thread for 30s
 @router.post("/{hook_id}/test", status_code=status.HTTP_200_OK)
-def test_webhook(
+async def test_webhook(
     hook_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -106,11 +118,18 @@ def test_webhook(
     db.commit()
     db.refresh(delivery)
     
-    # Run sync to get immediate result
-    deliver_webhook_sync(delivery.id)
+    # BUG-24: Run in a thread so we don't block the async event loop
+    await asyncio.to_thread(deliver_webhook_sync, delivery.id)
     db.refresh(delivery)
     
-    return delivery
+    return {
+        "id": delivery.id,
+        "webhook_id": delivery.webhook_id,
+        "status": delivery.status,
+        "http_status_code": delivery.http_status_code,
+        "response_body": delivery.response_body,
+        "attempts": delivery.attempts,
+    }
 
 @router.get("/{hook_id}/deliveries")
 def get_webhook_deliveries(
@@ -133,4 +152,15 @@ def get_webhook_deliveries(
         WebhookDelivery.webhook_id == hook_id
     ).order_by(WebhookDelivery.created_at.desc()).offset(skip).limit(limit).all()
     
-    return deliveries
+    return [
+        {
+            "id": d.id,
+            "webhook_id": d.webhook_id,
+            "invoice_id": d.invoice_id,
+            "status": d.status,
+            "http_status_code": d.http_status_code,
+            "attempts": d.attempts,
+            "created_at": str(d.created_at),
+        }
+        for d in deliveries
+    ]

@@ -23,8 +23,6 @@ export interface LineItem {
 }
 
 export interface InvoiceData {
-  metadata?: any;
-  gst_rules_json?: any;
   vendor_name?: ConfidenceField;
   vendor_gstin?: ConfidenceField;
   invoice_number?: ConfidenceField;
@@ -40,15 +38,33 @@ export interface InvoiceData {
   line_items?: LineItem[];
 }
 
+export interface GSTRulesResult {
+  passed: boolean;
+  rules: {
+    format: { valid: boolean; error: string | null };
+    checksum: { valid: boolean; error: string | null };
+    tax_math: { valid: boolean; error: string | null };
+    line_items_math: { valid: boolean; errors: string[] };
+    date: { valid: boolean; error: string | null };
+    place_of_supply: { valid: boolean; suggestion: string | null };
+  };
+  flags: string[];
+}
+
 export interface Invoice {
   id: string;
   original_filename: string;
   status: string;
   file_url: string;
   data_json: InvoiceData;
+  data?: InvoiceData;                    // backend alias
   confidence_score: number;
   created_at: string;
-  error_message?: string;
+  source_type: string | null;
+  ingestion_method: string | null;
+  gst_rules_json: GSTRulesResult | null;
+  processing_time_ms: number | null;
+  error_message?: string | null;
 }
 
 export interface InvoiceListItem {
@@ -60,6 +76,8 @@ export interface InvoiceListItem {
   vendor_name: string | null;
   total_amount: number | null;
   invoice_number: string | null;
+  ingestion_method: string | null;
+  source_type: string | null;
 }
 
 export interface Stats {

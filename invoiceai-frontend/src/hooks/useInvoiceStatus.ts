@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import type { Invoice } from '../types';
 
-export const useInvoiceStatus = (invoiceId: string | undefined) => {
+export const useInvoiceStatus = (invoiceId: string | undefined, options?: { disablePolling?: boolean }) => {
   return useQuery<Invoice>({
     queryKey: ['invoice', invoiceId],
     queryFn: async () => {
@@ -11,6 +11,7 @@ export const useInvoiceStatus = (invoiceId: string | undefined) => {
     },
     enabled: !!invoiceId,
     refetchInterval: (query) => {
+      if (options?.disablePolling) return false;
       const status = query.state.data?.status?.toUpperCase();
       if (!status || status === 'PROCESSING' || status === 'PENDING') {
         return 2000;
