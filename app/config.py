@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Optional
     ENVIRONMENT: str = "dev"
     LOG_LEVEL: str = "INFO"
+    APP_PORT: int = 8001
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

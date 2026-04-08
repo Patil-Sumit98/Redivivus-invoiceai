@@ -5,6 +5,7 @@ import { X, Loader2, Save, CheckCircle, AlertTriangle } from 'lucide-react';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import toast from 'react-hot-toast';
+import { resolveFileUrl } from '../utils/url';
 
 export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose: () => void }) => {
   // 1. Remove polling inside modal
@@ -83,7 +84,7 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
      );
   }
 
-  const fileUrl = invoice.file_url?.startsWith('http') ? invoice.file_url : `http://localhost:8000${invoice.file_url}`;
+  const fileUrl = resolveFileUrl(invoice.file_url);
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
 
   return (

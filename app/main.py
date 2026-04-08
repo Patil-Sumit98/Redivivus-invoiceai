@@ -46,8 +46,8 @@ if os.getenv("ENVIRONMENT", "dev") == "dev":
         "http://127.0.0.1:5501",
         "http://localhost:5500",
         "http://localhost:5501",
-        "http://127.0.0.1:8000",
-        "http://localhost:8000",
+        "http://127.0.0.1:8001",
+        "http://localhost:8001",
         "http://localhost:5173",   # Vite React dev server
         "http://127.0.0.1:5173",
     ]
