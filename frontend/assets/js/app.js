@@ -3,7 +3,7 @@
 /* ───────────────────────────────────────────
    CONFIG
 ─────────────────────────────────────────── */
-const BASE = window.location.port === '8000' ? '' : 'http://127.0.0.1:8000';
+const BASE = window.location.port === '8001' ? '' : 'http://127.0.0.1:8001';
 let authToken  = localStorage.getItem('iai_token') || null;
 let activeUser = null;
 let pollMap    = {};   // {key: intervalId}

@@ -5,6 +5,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { GSTRulesPanel } from '../components/GSTRulesPanel';
 import { LineItemsTable } from '../components/LineItemsTable';
 import { formatDate, formatCurrency } from '../utils/formatters';
+import { resolveFileUrl } from '../utils/url';
 import { AlertTriangle, Copy, Check, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -61,7 +62,7 @@ export const InvoiceDetailPage = () => {
   };
 
   const isReviewNeeded = ['NEEDS_REVIEW', 'HUMAN_REQUIRED'].includes(invoice.status?.toUpperCase() || '');
-  const fileUrl = invoice.file_url && invoice.file_url.startsWith('http') ? invoice.file_url : `http://localhost:8000${invoice.file_url}`;
+  const fileUrl = resolveFileUrl(invoice.file_url);
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
   
   // Overall Confidence Ring
