@@ -24,8 +24,8 @@ export const InvoiceDetailPage = () => {
     return <div className="flex h-[80vh] items-center justify-center text-red-500 font-medium">Failed to retrieve ledger record.</div>;
   }
 
-  const data = invoice.data_json || (invoice as any).data;
-  const gstRulesJson = invoice.gst_rules_json || (invoice as any).data?.gst_rules_json;
+  const data = invoice.data_json || invoice.data;
+  const gstRulesJson = invoice.gst_rules_json || invoice.data?.gst_rules_json;
 
   const handleCopyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(invoice, null, 2));
@@ -74,8 +74,8 @@ export const InvoiceDetailPage = () => {
       else ovRingColor = 'stroke-red-500 text-red-500';
   }
 
-  const isQR = (invoice as any).ingestion_method === 'QR' || (invoice as any).source_type === 'GST_EINVOICE';
-  const isOCR = (invoice as any).ingestion_method === 'OCR' || (invoice as any).source_type === 'GST_PDF';
+  const isQR = invoice.ingestion_method === 'QR' || invoice.source_type === 'GST_EINVOICE';
+  const isOCR = invoice.ingestion_method === 'OCR' || invoice.source_type === 'GST_PDF';
 
   return (
     <div className={`flex flex-col lg:flex-row h-full min-h-[85vh] gap-6 lg:gap-8 ${isReviewNeeded ? 'pb-24' : ''}`}>
