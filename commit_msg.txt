@@ -1,0 +1,21 @@
+chore(cleanup): Refactor project structure, fix TS errors, dynamic dashboard
+
+1. TypeScript Fixes:
+- Replaced stubbed UI components with strictly typed iterations to resolve 35 TS compilation errors.
+- Augmented the 'Invoice' and 'InvoiceData' interfaces to natively support nested 'gst_rules_json' handling, removing the need for '(invoice as any)' casts.
+- Restored missing 'import React' declarations where required by React.forwardRef.
+
+2. Dashboard Updates:
+- Updated 'DashboardPage' processing logic to dynamically compute OCR vs QR validation percentages.
+- Added 'Skeleton' loading components for stat cards while the 'useDashboardStats' payload is initializing.
+- Standardized 'source_type' parameter mapping inside 'InvoiceListItem'.
+
+3. Backend and DB Seeding:
+- Created 'scripts/seed_demo_data.py' to seed a demo entity with diverse confidence scoring and robust 'data_json' records.
+- Managed duplicate Alembic migration versions appropriately without breaking the chain.
+- Configured Vite server proxy settings via 'vite.config.ts' and '.env.local'.
+
+4. Project Architecture Cleanup:
+- Removed obsolete Vanilla JS 'frontend/' directory.
+- Relocated application guides into the cohesive 'docc/' directory.
+- Eliminated loose staging directories ('invoiceai_fixes*') and scratch artifacts to reduce project footprint.

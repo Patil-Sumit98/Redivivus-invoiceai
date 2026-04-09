@@ -16,7 +16,7 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
   const [notes, setNotes] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const invoiceData = invoice?.data_json || (invoice as any)?.data;
+  const invoiceData = invoice?.data_json || invoice?.data;
 
   useEffect(() => {
     if (invoiceData) {
@@ -185,7 +185,7 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
                    </div>
 
                    {(() => {
-                     const gstRules = (invoice as any)?.data_json?.gst_rules_json || (invoice as any)?.data?.gst_rules_json;
+                     const gstRules = invoice?.data_json?.gst_rules_json || invoice?.data?.gst_rules_json;
                      const flags = gstRules?.flags;
                      return flags && flags.length > 0 ? (
                       <div className="mt-6 p-4 rounded-xl bg-red-50 border border-red-200 space-y-2 shadow-sm">

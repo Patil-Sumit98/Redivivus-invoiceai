@@ -36,6 +36,7 @@ export interface InvoiceData {
   sgst?: ConfidenceField;
   igst?: ConfidenceField;
   line_items?: LineItem[];
+  gst_rules_json?: any;
 }
 
 export interface GSTRulesResult {
@@ -56,13 +57,13 @@ export interface Invoice {
   original_filename: string;
   status: string;
   file_url: string;
-  data_json: InvoiceData;
+  data_json?: InvoiceData;
   data?: InvoiceData;                    // backend alias
   confidence_score: number;
   created_at: string;
   source_type: string | null;
   ingestion_method: string | null;
-  gst_rules_json: GSTRulesResult | null;
+  gst_rules_json: any | null;
   processing_time_ms: number | null;
   error_message?: string | null;
 }
@@ -77,7 +78,7 @@ export interface InvoiceListItem {
   total_amount: number | null;
   invoice_number: string | null;
   ingestion_method: string | null;
-  source_type: string | null;
+  source_type?: string | null;
 }
 
 export interface Stats {

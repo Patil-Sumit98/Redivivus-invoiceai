@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { Skeleton } from '../components/ui/skeleton';
 import { useDashboardStats, useInvoiceList } from '../hooks/useInvoiceList';
 import { CheckCircle, AlertCircle, FileText, Clock, ArrowRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
@@ -12,22 +13,11 @@ export const DashboardPage = () => {
   const items = listPayload?.items || [];
   
   // Computations for Processing Method
-  const { qrPct, ocrPct } = useMemo(() => {
-    if (items.length === 0) return { qrPct: 0, ocrPct: 0 };
-    const qrCount = items.filter(i => 
-      i.ingestion_method === 'QR' || i.source_type === 'GST_EINVOICE'
-    ).length;
-    const ocrCount = items.filter(i => 
-      i.ingestion_method === 'OCR' || i.source_type === 'GST_PDF' || i.ingestion_method === 'HUMAN'
-    ).length;
-    
-    // If we have items but none mapped to these logic yet, prevent div by 0
-    const totalKnown = qrCount + ocrCount || 1; 
-    return {
-      qrPct: Math.round((qrCount / totalKnown) * 100),
-      ocrPct: Math.round((ocrCount / totalKnown) * 100),
-    };
-  }, [items]);
+  const allInvoices = listPayload?.items || [];
+  const qrCount = allInvoices.filter(i => i.source_type === 'GST_EINVOICE').length;
+  const total = allInvoices.length;
+  const qrPct = total > 0 ? Math.round((qrCount / total) * 100) : 0;
+  const ocrPct = 100 - qrPct;
 
   // Computations for Avg Confidence
   const avgConf = useMemo(() => {
@@ -71,45 +61,64 @@ export const DashboardPage = () => {
       
       {/* SECTION 2: Stats Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Total Processed</h2>
-            <div className="p-2 bg-ink-100 rounded-lg">
-              <FileText className="h-5 w-5 text-ink-600" />
+        {!stats ? (
+          <>
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <Skeleton className="h-20 w-full" />
             </div>
-          </div>
-          <div className="text-4xl font-bold text-ink-900">{stats?.total || 0}</div>
-        </div>
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <Skeleton className="h-20 w-full" />
+            </div>
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <Skeleton className="h-20 w-full" />
+            </div>
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <Skeleton className="h-20 w-full" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Total Processed</h2>
+                <div className="p-2 bg-ink-100 rounded-lg">
+                  <FileText className="h-5 w-5 text-ink-600" />
+                </div>
+              </div>
+              <div className="text-4xl font-bold text-ink-900">{stats?.total || 0}</div>
+            </div>
 
-        <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Auto-Approved</h2>
-            <div className="p-2 bg-green-100 rounded-lg">
-              <CheckCircle className="h-5 w-5 text-green-600" />
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Auto-Approved</h2>
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                </div>
+              </div>
+              <div className="text-4xl font-bold text-green-600">{stats?.completed || 0}</div>
             </div>
-          </div>
-          <div className="text-4xl font-bold text-green-600">{stats?.completed || 0}</div>
-        </div>
 
-        <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Awaiting Review</h2>
-            <div className="p-2 bg-amber-100 rounded-lg">
-              <Clock className="h-5 w-5 text-amber-600" />
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Awaiting Review</h2>
+                <div className="p-2 bg-amber-100 rounded-lg">
+                  <Clock className="h-5 w-5 text-amber-600" />
+                </div>
+              </div>
+              <div className="text-4xl font-bold text-amber-600">{stats?.processing || 0}</div>
             </div>
-          </div>
-          <div className="text-4xl font-bold text-amber-600">{stats?.processing || 0}</div>
-        </div>
 
-        <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Failed / Rejected</h2>
-            <div className="p-2 bg-red-100 rounded-lg">
-              <AlertCircle className="h-5 w-5 text-red-600" />
+            <div className="bg-white rounded-xl border border-ink-200 shadow-sm p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-ink-500 text-xs font-medium uppercase tracking-wide">Failed / Rejected</h2>
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                </div>
+              </div>
+              <div className="text-4xl font-bold text-red-600">{stats?.failed || 0}</div>
             </div>
-          </div>
-          <div className="text-4xl font-bold text-red-600">{stats?.failed || 0}</div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* SECTION 3: Two Columns */}
