@@ -327,12 +327,22 @@ def get_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
 
+    file_url = invoice.file_url
+    if file_url:
+        try:
+            from app.services.blob_storage import generate_sas_url
+            from app.config import settings
+            blob_name = file_url.split('?')[0].split('/')[-1]
+            file_url = generate_sas_url(blob_name, settings.AZURE_STORAGE_CONTAINER_NAME)
+        except Exception:
+            pass
+
     # Fix #1: Return both "data" (legacy) and "data_json" (new frontend)
     return {
         "id": invoice.id,
         "status": invoice.status,
         "original_filename": invoice.original_filename,
-        "file_url": invoice.file_url,
+        "file_url": file_url,
         "created_at": invoice.created_at,
         "confidence_score": invoice.confidence,
         "data": invoice.data_json,
@@ -397,6 +407,15 @@ def reprocess_invoice(
         try:
             from app.services.confidence_engine import compute_confidence
             from app.services.gst_rules import run_gst_rules
+
+            if file_url:
+                try:
+                    from app.services.blob_storage import generate_sas_url
+                    from app.config import settings
+                    blob_name = file_url.split('?')[0].split('/')[-1]
+                    file_url = generate_sas_url(blob_name, settings.AZURE_STORAGE_CONTAINER_NAME)
+                except Exception:
+                    pass
 
             raw_fields = analyze_invoice(file_url)
             mapped_data = map_fields(raw_fields)
