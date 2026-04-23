@@ -1,3 +1,10 @@
+"""
+Invoice field mapper — Azure Document Intelligence raw fields → canonical API contract.
+
+BUG-04: Attempts direct CGST/SGST/IGST extraction from Azure fields before fallback to _split_gst().
+"""
+
+
 def _get_field(fields: dict, key: str, value_type: str = "value_string") -> dict:
     """Safely extracts field values and confidence from Azure's raw data object."""
     field = fields.get(key)
@@ -14,6 +21,8 @@ def _get_field(fields: dict, key: str, value_type: str = "value_string") -> dict
             val = getattr(field, "value_date", None)
             if val:
                 val = str(val)
+        elif value_type == "value_number":
+            val = getattr(field, "value_number", None)
         else:
             val = getattr(field, value_type, None)
 
@@ -47,7 +56,12 @@ def _split_gst(total_tax_val, vendor_gstin: str, buyer_gstin: str):
 
 
 def map_fields(raw_fields: dict) -> dict:
-    """Maps Azure's prebuilt-invoice fields to our canonical API contract."""
+    """
+    Maps Azure's prebuilt-invoice fields to our canonical API contract.
+
+    BUG-04: Tries to extract CGST/SGST/IGST directly from Azure raw fields first.
+            Falls back to _split_gst() only when all three are None (with 0.6 confidence multiplier).
+    """
     if not raw_fields:
         return {}
 
@@ -60,7 +74,34 @@ def map_fields(raw_fields: dict) -> dict:
     total_tax_val = total_tax_data.get("value")
     tax_conf = total_tax_data.get("confidence", 0.0)
 
-    cgst_val, sgst_val, igst_val = _split_gst(total_tax_val, vendor_gstin_val, buyer_gstin_val)
+    # ── BUG-04: Try direct CGST/SGST/IGST extraction from Azure fields ──
+    direct_cgst = _get_field(raw_fields, "CGST", "value_currency")
+    direct_sgst = _get_field(raw_fields, "SGST", "value_currency")
+    direct_igst = _get_field(raw_fields, "IGST", "value_currency")
+
+    # Also try alternate field names used by some Azure models
+    if direct_cgst["value"] is None:
+        direct_cgst = _get_field(raw_fields, "TaxDetails.CGST", "value_currency")
+    if direct_sgst["value"] is None:
+        direct_sgst = _get_field(raw_fields, "TaxDetails.SGST", "value_currency")
+    if direct_igst["value"] is None:
+        direct_igst = _get_field(raw_fields, "TaxDetails.IGST", "value_currency")
+
+    # Determine tax extraction method
+    if (direct_cgst["value"] is None and direct_sgst["value"] is None
+            and direct_igst["value"] is None):
+        # Fallback: derive from total tax (lower confidence)
+        cgst_val, sgst_val, igst_val = _split_gst(total_tax_val, vendor_gstin_val, buyer_gstin_val)
+        cgst = {"value": cgst_val, "confidence": round(tax_conf * 0.6, 4)}
+        sgst = {"value": sgst_val, "confidence": round(tax_conf * 0.6, 4)}
+        igst = {"value": igst_val, "confidence": round(tax_conf * 0.6, 4)}
+        tax_method = "derived"
+    else:
+        # Direct extraction — full confidence from Azure
+        cgst = direct_cgst
+        sgst = direct_sgst
+        igst = direct_igst
+        tax_method = "direct"
 
     data = {
         "vendor_name": _get_field(raw_fields, "VendorName", "value_string"),
@@ -72,9 +113,10 @@ def map_fields(raw_fields: dict) -> dict:
         "buyer_gstin": buyer_gstin_data,
         "subtotal": _get_field(raw_fields, "SubTotal", "value_currency"),
         "total_amount": _get_field(raw_fields, "InvoiceTotal", "value_currency"),
-        "cgst": {"value": cgst_val, "confidence": tax_conf},
-        "sgst": {"value": sgst_val, "confidence": tax_conf},
-        "igst": {"value": igst_val, "confidence": tax_conf},
+        "cgst": cgst,
+        "sgst": sgst,
+        "igst": igst,
+        "tax_method": tax_method,  # BUG-04: "direct" if Azure extracted, "derived" if split
         "line_items": [],
     }
 
@@ -149,5 +191,6 @@ def map_gst_qr_to_canonical(qr_data: dict) -> dict:
         "cgst": _make(_val(["CgstVal", "TotCgst"])),
         "sgst": _make(_val(["SgstVal", "TotSgst"])),
         "igst": _make(_val(["IgstVal", "TotIgst"])),
+        "tax_method": "direct",  # QR data is always direct
         "line_items": line_items
-    }
+    }

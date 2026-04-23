@@ -1,3 +1,8 @@
+"""
+GST rules engine for InvoiceAI.
+
+BUG-05: Invoice date window configurable via INVOICE_DATE_MAX_AGE_DAYS (default: 1095 = 3 years).
+"""
 import re
 from datetime import datetime, date, timedelta
 from typing import Dict, Any
@@ -116,11 +121,13 @@ def validate_line_item_math(line_items: list, subtotal: float, cgst: float, sgst
     return {"valid": len(errors) == 0, "errors": errors}
 
 def validate_invoice_date(invoice_date_str: str) -> dict:
-    """Rule 5: Date bounds check"""
+    """Rule 5: Date bounds check — configurable via settings.INVOICE_DATE_MAX_AGE_DAYS"""
     if not invoice_date_str:
         return {"valid": False, "error": "Invoice date missing"}
         
     try:
+        from app.config import settings
+
         # Assuming YYYY-MM-DD from mapper
         inv_date = date.fromisoformat(invoice_date_str)
         today = date.today()
@@ -128,9 +135,10 @@ def validate_invoice_date(invoice_date_str: str) -> dict:
         if inv_date > today:
             return {"valid": False, "error": "Invoice date lies in the future"}
             
-        limit_date = today - timedelta(days=180)
+        # BUG-05: Configurable window — default 1095 days (3 years for GST reconciliation)
+        limit_date = today - timedelta(days=settings.INVOICE_DATE_MAX_AGE_DAYS)
         if inv_date < limit_date:
-            return {"valid": False, "error": "Invoice date is older than 180 days"}
+            return {"valid": False, "error": f"Invoice date is older than {settings.INVOICE_DATE_MAX_AGE_DAYS} days"}
             
         return {"valid": True, "error": None}
     except ValueError:

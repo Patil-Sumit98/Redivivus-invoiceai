@@ -10,3 +10,5 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     api_key = Column(String, unique=True, index=True)
+    # BUG-06: Store SHA-256 hash of refresh token — never store raw token
+    refresh_token_hash = Column(String(64), nullable=True)

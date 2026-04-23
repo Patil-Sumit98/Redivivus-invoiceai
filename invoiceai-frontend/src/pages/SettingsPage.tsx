@@ -50,10 +50,12 @@ export const SettingsPage = () => {
     mutationFn: async () => {
       if (!hookUrl.startsWith('https://')) throw new Error('URL must start with https://');
       if (hookEvents.length === 0) throw new Error('Select at least one event');
+      // BUG-13: Require a strong secret — no default-secret fallback
+      if (!hookSecret || hookSecret.length < 16) throw new Error('Secret must be at least 16 characters. Click "Generate" for a cryptographic secret.');
       const res = await apiClient.post('/webhooks', {
         url: hookUrl,
         events: hookEvents,
-        secret: hookSecret || 'default-secret',
+        secret: hookSecret,
       });
       return res.data;
     },
@@ -121,8 +123,9 @@ export const SettingsPage = () => {
     }
   };
 
+  // BUG-13: Generate 32-byte (64 hex char) cryptographic secret
   const generateHex = () => {
-    const arr = new Uint8Array(16);
+    const arr = new Uint8Array(32);
     window.crypto.getRandomValues(arr);
     setHookSecret(Array.from(arr, dec => dec.toString(16).padStart(2, "0")).join(''));
   };

@@ -56,9 +56,10 @@ export interface Invoice {
   id: string;
   original_filename: string;
   status: string;
-  file_url: string;
+  file_url: string;                        // VUL-01: blob_name (internal reference)
+  file_url_sas?: string;                   // VUL-01: time-limited SAS URL for display
   data_json?: InvoiceData;
-  data?: InvoiceData;                    // backend alias
+  data?: InvoiceData;                      // backend alias
   confidence_score: number;
   created_at: string;
   source_type: string | null;

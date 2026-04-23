@@ -1,3 +1,9 @@
+"""
+Webhooks router for InvoiceAI.
+
+VUL-02: Wraps _is_safe_webhook_url() in try/except with WARNING logging.
+"""
+import logging
 from typing import List, Optional
 import hashlib
 import asyncio
@@ -10,6 +16,8 @@ from app.models.user import User
 from app.models.webhook import Webhook, WebhookDelivery
 from app.middleware.auth import get_current_user
 from app.services.webhook_service import deliver_webhook_sync, _is_safe_webhook_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -24,9 +32,17 @@ def register_webhook(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # BUG-04: Validate URL against SSRF before storing
+    # VUL-02: Validate URL against SSRF (includes DNS resolution) with error handling
     url_str = str(payload.url)
-    if not _is_safe_webhook_url(url_str):
+    try:
+        is_safe = _is_safe_webhook_url(url_str)
+    except Exception as e:
+        # VUL-02: Log any unexpected exceptions during URL validation
+        sanitized_url = url_str[:100] if url_str else "<empty>"
+        logger.warning(f"[webhook] URL validation exception for '{sanitized_url}': {e}")
+        is_safe = False
+
+    if not is_safe:
         raise HTTPException(
             status_code=400,
             detail="Webhook URL is blocked. Private IPs and internal addresses are not allowed."
