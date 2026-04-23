@@ -22,6 +22,19 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     APP_PORT: int = 8001
 
+    # BUG-05: GST e-Invoice IRN must be generated within 30 days of invoice date.
+    # But for reconciliation/audit uploads, India IT Act allows 3-year retention.
+    # Set to 1095 (3 years) to support audit workflows.
+    INVOICE_DATE_MAX_AGE_DAYS: int = 1095
+
+    # BUG-08: Redis for distributed rate limiting across workers
+    REDIS_URL: str = "redis://localhost:6379"
+    UPLOAD_RATE_LIMIT_PER_MIN: int = 100
+
+    # BUG-19: Database connection pool tuning
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── Validators ──────────────────────────

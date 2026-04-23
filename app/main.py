@@ -1,6 +1,16 @@
+"""
+InvoiceAI — FastAPI Application Entry Point.
+
+BUG-15: Hardened CORS + HSTS headers.
+BUG-16: Stuck invoice cleanup background task.
+BUG-17: Content-Length limit middleware (20MB).
+BUG-21: pyzbar startup health check.
+"""
+import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +24,71 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.routers import auth, invoices, review, webhooks
 import os
 
+logger = logging.getLogger("invoiceai")
+
+# ── BUG-21: Track QR detection availability ────────────────────────────────
+_qr_detection_ok = True
+
+
+# ── BUG-16: Lifespan — startup/shutdown tasks ─────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup checks + background cleanup tasks."""
+    global _qr_detection_ok
+
+    # BUG-21: Check pyzbar/cv2 availability at startup
+    try:
+        from pyzbar.pyzbar import decode  # noqa: F401
+        import cv2  # noqa: F401
+        _qr_detection_ok = True
+        logger.info("[startup] QR detection libraries loaded successfully")
+    except ImportError as e:
+        _qr_detection_ok = False
+        logger.warning(f"[startup] QR detection DISABLED. Install libzbar0: {e}")
+        logger.warning("[startup] On Ubuntu: sudo apt-get install -y libzbar0 libzbar-dev")
+
+    # BUG-16: Start stuck invoice cleanup task
+    cleanup_task = asyncio.create_task(_cleanup_stuck_invoices())
+
+    yield
+
+    # Shutdown: cancel background tasks
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _cleanup_stuck_invoices():
+    """BUG-16: Periodically marks invoices stuck in 'processing' for >15 min as HUMAN_REQUIRED."""
+    while True:
+        await asyncio.sleep(5 * 60)  # Run every 5 minutes
+        try:
+            from app.database import SessionLocal
+            from app.models.invoice import Invoice
+
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+            db = SessionLocal()
+            try:
+                stuck = db.query(Invoice).filter(
+                    Invoice.status == "processing",
+                    Invoice.created_at < cutoff
+                ).all()
+                for inv in stuck:
+                    inv.status = "HUMAN_REQUIRED"
+                    inv.error_detail = "Processing timed out after 15 minutes"
+                    logger.warning(f"[cleanup] Invoice {inv.id} marked HUMAN_REQUIRED (stuck)")
+                if stuck:
+                    db.commit()
+                    logger.info(f"[cleanup] Cleaned up {len(stuck)} stuck invoice(s)")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"[cleanup] Stuck invoice cleanup error: {e}")
+
+
 # ───────────────────────────────────────────────
 # Application
 # ───────────────────────────────────────────────
@@ -21,10 +96,30 @@ app = FastAPI(
     title="InvoiceAI API",
     description="AI-powered invoice processing for Indian GST compliance",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
+
+# ── BUG-17: Content-Length Limit Middleware ─────────────────────────────────
+
+class ContentLengthLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests with Content-Length > 20MB before reading the body."""
+    MAX_BYTES = 20 * 1024 * 1024  # 20MB
+
+    async def dispatch(self, request: Request, call_next):
+        cl = request.headers.get("content-length")
+        if cl and int(cl) > self.MAX_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "File exceeds 20MB limit."}
+            )
+        return await call_next(request)
+
+app.add_middleware(ContentLengthLimitMiddleware)
+
+
 # ───────────────────────────────────────────────
-# Security Headers Middleware
+# BUG-15: Hardened Security Headers Middleware
 # ───────────────────────────────────────────────
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -33,12 +128,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # BUG-15: Additional hardened headers
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        response.headers["Cache-Control"] = "no-store"  # Prevents caching financial data
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+
 # ───────────────────────────────────────────────
-# CORS
+# BUG-15: Narrowed CORS Configuration
 # ───────────────────────────────────────────────
 if os.getenv("ENVIRONMENT", "dev") == "dev":
     origins = [
@@ -61,14 +161,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # BUG-15: Explicit method/header lists instead of wildcards
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Idempotency-Key"],
 )
 
 # ───────────────────────────────────────────────
 # Global Exception Handlers
 # ───────────────────────────────────────────────
-logger = logging.getLogger("invoiceai")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -147,7 +247,7 @@ def frontend_app():
 # ───────────────────────────────────────────────
 @app.get("/health")
 def health():
-    """Health check — verifies API + DB + Azure config."""
+    """Health check — verifies API + DB + Azure config + QR detection."""
     from app.database import SessionLocal
     from sqlalchemy import text
 
@@ -175,5 +275,7 @@ def health():
         "environment": os.getenv("ENVIRONMENT", "dev"),
         "db": db_status,
         "azure_ai": azure_status,
+        # BUG-21: Report QR detection library status
+        "qr_detection": "ok" if _qr_detection_ok else "disabled (see startup log)",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

@@ -12,7 +12,7 @@ import toast from 'react-hot-toast';
 export const InvoiceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: invoice, isLoading, error } = useInvoiceStatus(id);
+  const { data: invoice, isLoading, error, isPollingTimedOut } = useInvoiceStatus(id);
   const [activeTab, setActiveTab] = useState<'data' | 'gst' | 'items' | 'json'>('data');
   const [copied, setCopied] = useState(false);
 
@@ -62,8 +62,10 @@ export const InvoiceDetailPage = () => {
   };
 
   const isReviewNeeded = ['NEEDS_REVIEW', 'HUMAN_REQUIRED'].includes(invoice.status?.toUpperCase() || '');
-  const fileUrl = resolveFileUrl(invoice.file_url);
+  // VUL-01: Use SAS URL (time-limited) instead of raw blob URL
+  const fileUrl = invoice.file_url_sas ? invoice.file_url_sas : resolveFileUrl(invoice.file_url);
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
+  const hasFileUrl = !!fileUrl && fileUrl !== 'undefined' && fileUrl !== 'null';
   
   // Overall Confidence Ring
   const ovScore = invoice.confidence_score !== null && invoice.confidence_score !== undefined ? Math.round(invoice.confidence_score * 100) : null;
@@ -92,7 +94,16 @@ export const InvoiceDetailPage = () => {
         </div>
         
         <div className="flex-1 overflow-hidden bg-white/50 relative flex items-center justify-center p-2 min-h-[500px]">
-           {isPDF ? (
+           {/* BUG-20: Loading skeleton when file URL is not yet available */}
+           {!hasFileUrl ? (
+             <div className="w-full h-full flex flex-col items-center justify-center space-y-4">
+               <div className="w-3/4 h-4 bg-ink-200 rounded animate-pulse" />
+               <div className="w-2/3 h-4 bg-ink-200 rounded animate-pulse" />
+               <div className="w-1/2 h-4 bg-ink-200 rounded animate-pulse" />
+               <div className="w-3/4 h-48 bg-ink-200 rounded animate-pulse mt-4" />
+               <p className="text-xs text-ink-400 font-medium mt-2">Loading document preview...</p>
+             </div>
+           ) : isPDF ? (
              <iframe src={fileUrl} className="w-full h-full rounded shadow-inner" title="PDF Viewer" />
            ) : (
              <img src={fileUrl} alt="Invoice Document" className="max-w-full max-h-full object-contain rounded drop-shadow-sm" />
@@ -217,6 +228,16 @@ export const InvoiceDetailPage = () => {
            )}
         </div>
       </div>
+
+      {/* BUG-16: Polling timeout warning */}
+      {isPollingTimedOut && invoice.status?.toUpperCase() === 'PROCESSING' && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 md:left-[240px]">
+          <div className="bg-red-50 border-t-2 border-red-400 px-6 py-3 flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
+            <p className="text-xs font-semibold text-red-700">Processing is taking longer than expected. The server will auto-escalate this invoice for manual review shortly.</p>
+          </div>
+        </div>
+      )}
 
       {/* Manual Review Required Banner */}
       {isReviewNeeded && (

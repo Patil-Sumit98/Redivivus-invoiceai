@@ -10,6 +10,8 @@ class Invoice(Base):
     user_id = Column(String(36), ForeignKey("users.id"))
     status = Column(String, default="processing")
     original_filename = Column(String)
+    # VUL-01: This column stores the blob_name (e.g. "abc123.pdf"), NOT a full URL.
+    # SAS URLs are generated on-demand via get_blob_sas_url(). Column name kept to avoid migration.
     file_url = Column(String)
     raw_json = Column(Text)
     data_json = Column(JSON)
@@ -23,4 +25,5 @@ class Invoice(Base):
     processing_time_ms = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # BUG-11: Added server_default so updated_at is never NULL on initial insert
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

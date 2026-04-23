@@ -1,3 +1,8 @@
+"""
+Review queue router for InvoiceAI.
+
+BUG-22: Audit log stores diff-only for EDITED, minimal payloads for APPROVED/REJECTED.
+"""
 import logging
 from typing import Optional, Literal
 from pydantic import BaseModel
@@ -21,6 +26,20 @@ class ReviewSubmit(BaseModel):
     action: Literal["APPROVED", "REJECTED", "EDITED"]
     corrected_data: Optional[dict] = None
     notes: Optional[str] = None
+
+
+# ── BUG-22: Diff-only audit storage ───────────────────────────────────────
+
+def _compute_diff(before: dict, after: dict) -> dict:
+    """Returns only the keys that changed between before and after."""
+    diff = {}
+    all_keys = set(list((before or {}).keys()) + list((after or {}).keys()))
+    for k in all_keys:
+        b_val = (before or {}).get(k)
+        a_val = (after or {}).get(k)
+        if b_val != a_val:
+            diff[k] = {"before": b_val, "after": a_val}
+    return diff
 
 
 @router.get("/queue")
@@ -102,20 +121,26 @@ def submit_review(
     new_status = invoice.status
     new_ingestion = invoice.ingestion_method
 
+    # BUG-22: Prepare diff-only audit log entries
+    log_before = None
+    log_after = None
+
     if payload.action == "APPROVED":
         new_status = "VERIFIED"
         new_ingestion = "HUMAN"
-        # BUG-27: Document that human approved data as-is (distinct from before_data)
-        after_data = {
-            **(invoice.data_json or {}),
-            "_review_metadata": {
-                "action": "APPROVED",
-                "reviewer_id": current_user.id,
-                "note": "Data approved by human reviewer without changes.",
-            },
-        }
+        # BUG-22: Minimal payload for approvals
+        log_before = {"status": "approved_as_is"}
+        log_after = {"reviewer": current_user.id}
+
     elif payload.action == "REJECTED":
         new_status = "REJECTED"
+        # BUG-22: Minimal payload for rejections
+        log_before = {
+            "invoice_id": invoice.id,
+            "original_filename": invoice.original_filename,
+        }
+        log_after = {"reason": payload.notes}
+
     elif payload.action == "EDITED":
         if not payload.corrected_data:
             raise HTTPException(status_code=400, detail="corrected_data is required when action is EDITED.")
@@ -125,13 +150,16 @@ def submit_review(
         invoice.confidence = conf_result["overall_score"]
         new_status = "VERIFIED"
         new_ingestion = "HUMAN"
+        # BUG-22: Store only the diff — not full before/after blobs
+        log_before = _compute_diff(before_data or {}, after_data or {})
+        log_after = None  # diff already captures both
 
     log_entry = ReviewLog(
         invoice_id=invoice.id,
         reviewer_user_id=current_user.id,
         action=payload.action,
-        before_data=before_data,
-        after_data=after_data,
+        before_data=log_before,
+        after_data=log_after,
         notes=payload.notes,
     )
 

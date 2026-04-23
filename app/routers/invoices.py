@@ -1,3 +1,12 @@
+"""
+Invoice router for InvoiceAI.
+
+VUL-01: Stores blob_name, returns file_url_sas on demand.
+VUL-03: Background task no longer holds file_bytes.
+BUG-07: Uses unified processing pipeline.
+BUG-09: Search queries JSON fields (vendor_name, invoice_number, GSTIN).
+BUG-14: CSV export uses streaming generator; XLSX capped at 10,000 rows.
+"""
 import hashlib
 import logging
 import io
@@ -6,13 +15,13 @@ import csv
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc
+from sqlalchemy import func as sqlfunc, or_, cast, String
 from app.database import get_db, SessionLocal
 from app.models.user import User
 from app.models.invoice import Invoice
 from app.middleware.auth import get_current_user
 from app.middleware.rate_limit import rate_limited_user
-from app.services.blob_storage import upload_file_to_blob
+from app.services.blob_storage import upload_file_to_blob, get_blob_sas_url
 from app.services.azure_ai import analyze_invoice
 from app.services.invoice_mapper import map_fields, map_gst_qr_to_canonical
 
@@ -40,70 +49,13 @@ def _validate_file_magic(file_bytes: bytes, ext: str) -> bool:
     return any(file_bytes[:len(sig)] == sig for sig in sigs)
 
 
-def process_invoice_task(invoice_id: str, file_bytes: bytes, filename: str, blob_url: str):
-    """BUG-23: blob_url is pre-uploaded by the endpoint to free memory sooner."""
-    import time
-    logger = logging.getLogger(__name__)
-    start_time = time.monotonic()
-    db = SessionLocal()
-    try:
-        logger.info(f"[invoice:{invoice_id}] Processing started")
+# ── BUG-07: Unified pipeline wrapper ───────────────────────────────────────
 
-        from app.services.qr_detector import detect_gst_qr
-        from app.services.confidence_engine import compute_confidence
-        from app.services.gst_rules import run_gst_rules
-
-        # STEP 1: QR Detection (try first — zero AI cost)
-        qr_data = detect_gst_qr(file_bytes, filename)
-
-        if qr_data:
-            logger.info(f"[invoice:{invoice_id}] QR code detected — skipping Azure AI")
-            mapped_data = map_gst_qr_to_canonical(qr_data)
-            source_type = "GST_EINVOICE"
-            ingestion_method = "QR"
-        else:
-            logger.info(f"[invoice:{invoice_id}] No QR — sending to Azure AI OCR")
-            raw_fields = analyze_invoice(blob_url)
-            mapped_data = map_fields(raw_fields)
-            source_type = "GST_PDF"
-            ingestion_method = "OCR"
-
-        # STEP 2: GST Rules validation
-        gst_result = run_gst_rules(mapped_data)
-
-        # STEP 3: Confidence scoring and routing
-        conf_result = compute_confidence(mapped_data)
-
-        # STEP 4: Save
-        elapsed_ms = int((time.monotonic() - start_time) * 1000)
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-        if invoice:
-            invoice.file_url = blob_url
-            invoice.data_json = mapped_data
-            invoice.confidence = conf_result["overall_score"]
-            invoice.status = conf_result["status"]
-            invoice.source_type = source_type
-            invoice.ingestion_method = ingestion_method
-            invoice.gst_rules_json = gst_result
-            invoice.processing_time_ms = elapsed_ms
-            db.commit()
-            logger.info(
-                f"[invoice:{invoice_id}] Done. status={invoice.status} "
-                f"confidence={invoice.confidence} time={elapsed_ms}ms"
-            )
-
-            from app.services.webhook_service import trigger_webhooks_for_invoice
-            trigger_webhooks_for_invoice(invoice.id, invoice.user_id, "invoice.completed")
-    except Exception as e:
-        logger.error(f"[invoice:{invoice_id}] Failed: {e}", exc_info=True)
-        db.rollback()
-        inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-        if inv:
-            inv.status = "HUMAN_REQUIRED"
-            inv.error_detail = str(e)[:500]
-            db.commit()
-    finally:
-        db.close()
+def _run_pipeline_task(invoice_id: str, blob_name: str, filename: str):
+    """Background task wrapper: generates SAS URL and runs the unified pipeline."""
+    from app.services.processing_pipeline import run_invoice_pipeline
+    blob_url = get_blob_sas_url(blob_name)
+    run_invoice_pipeline(invoice_id, blob_url, filename)
 
 
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
@@ -173,7 +125,6 @@ async def upload_invoice(
         db.refresh(new_invoice)
     except IntegrityError:
         db.rollback()
-        # Re-fetch the existing invoice that won the race
         existing = db.query(Invoice).filter(
             Invoice.user_id == current_user.id,
             Invoice.idempotency_key == hashed_key,
@@ -185,15 +136,32 @@ async def upload_invoice(
             )
         raise HTTPException(status_code=500, detail="Unexpected conflict during upload.")
 
-    # BUG-23: Upload to blob here so file_bytes can be GC'd sooner
-    blob_url = upload_file_to_blob(file_bytes, file.filename)
+    # VUL-01: Upload to blob — returns blob_name (not full URL)
+    try:
+        blob_name = upload_file_to_blob(file_bytes, file.filename)
+    except RuntimeError as e:
+        # Azure Storage account disabled or unreachable
+        new_invoice.status = "failed"
+        new_invoice.error_detail = str(e)[:500]
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
 
+    # VUL-01: Store blob_name in DB (column kept as file_url to avoid migration)
+    new_invoice.file_url = blob_name
+    db.commit()
+
+    # VUL-03: Free file_bytes immediately — no longer passed to background task
+    del file_bytes
+
+    # BUG-07: Use unified pipeline (includes QR detection for all paths)
     background_tasks.add_task(
-        process_invoice_task,
+        _run_pipeline_task,
         invoice_id=new_invoice.id,
-        file_bytes=file_bytes,
+        blob_name=blob_name,
         filename=file.filename,
-        blob_url=blob_url,
     )
 
     return {
@@ -213,7 +181,6 @@ def get_stats(
     and all review statuses as one number."""
     total = db.query(Invoice).filter(Invoice.user_id == current_user.id).count()
 
-    # Completed = legacy "completed" + new "AUTO_APPROVED" + "VERIFIED"
     completed = db.query(Invoice).filter(
         Invoice.user_id == current_user.id,
         Invoice.status.in_(["completed", "AUTO_APPROVED", "VERIFIED"]),
@@ -275,13 +242,24 @@ def list_invoices(
         status_values = status_map.get(status, [status])
         query = query.filter(Invoice.status.in_(status_values))
 
-    # Search by vendor name or invoice number (server-side)
+    # BUG-09: Search across vendor name, invoice number, GSTIN, and filename
     if search and search.strip():
         search_term = f"%{search.strip()}%"
-        # Since vendor_name is inside JSON, we do a broad text search on data_json
-        query = query.filter(
-            Invoice.original_filename.ilike(search_term)
-        )
+        from app.config import settings
+        if settings.DATABASE_URL.startswith("postgresql"):
+            # PostgreSQL: Use JSON path operators for precise field search
+            vendor_search = Invoice.data_json["vendor_name"]["value"].astext.ilike(search_term)
+            inv_num_search = Invoice.data_json["invoice_number"]["value"].astext.ilike(search_term)
+            gstin_search = Invoice.data_json["vendor_gstin"]["value"].astext.ilike(search_term)
+            filename_search = Invoice.original_filename.ilike(search_term)
+            query = query.filter(or_(vendor_search, inv_num_search, gstin_search, filename_search))
+        else:
+            # SQLite: Cast JSON to text and use broad LIKE search
+            json_text = cast(Invoice.data_json, String)
+            query = query.filter(or_(
+                Invoice.original_filename.ilike(search_term),
+                json_text.ilike(search_term),
+            ))
 
     total = query.count()
 
@@ -306,10 +284,12 @@ def list_invoices(
                 "invoice_number": _safe_get(inv.data_json, "invoice_number"),
                 "ingestion_method": inv.ingestion_method,
                 "source_type": inv.source_type,
+                # VUL-01: file_url removed from list view — no direct file access needed
             }
             for inv in invoices
         ],
         "total": total,
+        "search_fields": ["filename", "vendor_name", "invoice_number", "vendor_gstin"],
     }
 
 
@@ -327,22 +307,20 @@ def get_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
 
-    file_url = invoice.file_url
-    if file_url:
+    # VUL-01: Generate fresh SAS URL on demand from stored blob_name
+    file_url_sas = None
+    if invoice.file_url:
         try:
-            from app.services.blob_storage import generate_sas_url
-            from app.config import settings
-            blob_name = file_url.split('?')[0].split('/')[-1]
-            file_url = generate_sas_url(blob_name, settings.AZURE_STORAGE_CONTAINER_NAME)
+            file_url_sas = get_blob_sas_url(invoice.file_url)
         except Exception:
             pass
 
-    # Fix #1: Return both "data" (legacy) and "data_json" (new frontend)
     return {
         "id": invoice.id,
         "status": invoice.status,
         "original_filename": invoice.original_filename,
-        "file_url": file_url,
+        "file_url": invoice.file_url,        # VUL-01: blob_name (internal reference)
+        "file_url_sas": file_url_sas,         # VUL-01: time-limited SAS URL for frontend
         "created_at": invoice.created_at,
         "confidence_score": invoice.confidence,
         "data": invoice.data_json,
@@ -380,7 +358,7 @@ def reprocess_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fix #10: Use the full pipeline (GST rules + confidence engine) on reprocess."""
+    """BUG-07: Uses unified pipeline (includes QR detection on reprocess)."""
     invoice = db.query(Invoice).filter(
         Invoice.id == invoice_id,
         Invoice.user_id == current_user.id,
@@ -399,103 +377,88 @@ def reprocess_invoice(
     invoice.error_detail = None
     db.commit()
 
-    def reprocess_task(inv_id: str, file_url: str):
-        import time
-        _logger = logging.getLogger(__name__)
-        start = time.monotonic()
-        _db = SessionLocal()
-        try:
-            from app.services.confidence_engine import compute_confidence
-            from app.services.gst_rules import run_gst_rules
-
-            if file_url:
-                try:
-                    from app.services.blob_storage import generate_sas_url
-                    from app.config import settings
-                    blob_name = file_url.split('?')[0].split('/')[-1]
-                    file_url = generate_sas_url(blob_name, settings.AZURE_STORAGE_CONTAINER_NAME)
-                except Exception:
-                    pass
-
-            raw_fields = analyze_invoice(file_url)
-            mapped_data = map_fields(raw_fields)
-            gst_result = run_gst_rules(mapped_data)
-            conf_result = compute_confidence(mapped_data)
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-
-            inv = _db.query(Invoice).filter(Invoice.id == inv_id).first()
-            if inv:
-                inv.raw_json = str(raw_fields)  # BUG-14: Update raw_json so UI Raw JSON tab is fresh
-                inv.data_json = mapped_data
-                inv.confidence = conf_result["overall_score"]
-                inv.status = conf_result["status"]
-                inv.gst_rules_json = gst_result
-                inv.ingestion_method = "OCR"
-                inv.processing_time_ms = elapsed_ms
-                inv.error_detail = None
-                _db.commit()
-                _logger.info(f"[invoice:{inv_id}] Reprocessed. status={inv.status} confidence={inv.confidence}")
-        except Exception as e:
-            _db.rollback()
-            inv = _db.query(Invoice).filter(Invoice.id == inv_id).first()
-            if inv:
-                inv.status = "HUMAN_REQUIRED"
-                inv.error_detail = str(e)[:500]
-                _db.commit()
-            _logger.error(f"[invoice:{inv_id}] Reprocess failed: {e}", exc_info=True)
-        finally:
-            _db.close()
-
-    background_tasks.add_task(reprocess_task, invoice.id, invoice.file_url)
+    # BUG-07: Use unified pipeline — same as initial upload (includes QR detection)
+    background_tasks.add_task(
+        _run_pipeline_task,
+        invoice_id=invoice.id,
+        blob_name=invoice.file_url,       # VUL-01: file_url is blob_name
+        filename=invoice.original_filename or "unknown.pdf",
+    )
 
     return {"id": invoice.id, "status": "processing"}
 
 
 # ── Export Endpoints ────────────────────────────
+# BUG-14: Streaming CSV generator + XLSX 10K cap
+
+def _csv_row(inv: Invoice) -> list:
+    """Build a CSV row from an Invoice object."""
+    data = inv.data_json or {}
+    confidence_val = inv.confidence if inv.confidence is not None else 0.0
+
+    def _g(key):
+        v = data.get(key, {})
+        return v.get("value", "") if isinstance(v, dict) else ""
+
+    return [
+        inv.id,
+        inv.original_filename or "",
+        inv.status or "",
+        round(confidence_val, 4),
+        _g("vendor_name"),
+        _g("vendor_gstin"),
+        _g("invoice_number"),
+        _g("invoice_date"),
+        _g("total_amount"),
+        inv.created_at.isoformat() if inv.created_at else "",
+        inv.processing_time_ms if inv.processing_time_ms is not None else "",
+    ]
+
+
+CSV_HEADERS = [
+    "id", "original_filename", "status", "confidence_score",
+    "vendor_name", "vendor_gstin", "invoice_number", "invoice_date",
+    "total_amount", "created_at", "processing_time_ms",
+]
+
 
 @router.get("/export/csv")
 def export_invoices_csv(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    invoices = db.query(Invoice).filter(Invoice.user_id == current_user.id).order_by(Invoice.created_at.desc()).all()
+    """BUG-14: Streaming CSV export — processes in batches of 500."""
+    def _generate():
+        # Header
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(CSV_HEADERS)
+        yield buf.getvalue()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
+        offset = 0
+        batch_size = 500
+        while True:
+            batch = (
+                db.query(Invoice)
+                .filter(Invoice.user_id == current_user.id)
+                .order_by(Invoice.created_at.desc())
+                .offset(offset)
+                .limit(batch_size)
+                .all()
+            )
+            if not batch:
+                break
 
-    headers = [
-        "id", "original_filename", "status", "confidence_score",
-        "vendor_name", "vendor_gstin", "invoice_number", "invoice_date",
-        "total_amount", "created_at", "processing_time_ms",
-    ]
-    writer.writerow(headers)
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            for inv in batch:
+                writer.writerow(_csv_row(inv))
+            yield buf.getvalue()
 
-    for inv in invoices:
-        data = inv.data_json or {}
-        confidence_val = inv.confidence if inv.confidence is not None else 0.0
+            offset += batch_size
 
-        def _g(key):
-            v = data.get(key, {})
-            return v.get("value", "") if isinstance(v, dict) else ""
-
-        row = [
-            inv.id,
-            inv.original_filename or "",
-            inv.status or "",
-            round(confidence_val, 4),
-            _g("vendor_name"),
-            _g("vendor_gstin"),
-            _g("invoice_number"),
-            _g("invoice_date"),
-            _g("total_amount"),
-            inv.created_at.isoformat() if inv.created_at else "",
-            inv.processing_time_ms if inv.processing_time_ms is not None else "",
-        ]
-        writer.writerow(row)
-
-    output.seek(0)
     return StreamingResponse(
-        iter([output.getvalue()]),
+        _generate(),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="invoices.csv"'},
     )
@@ -506,10 +469,20 @@ def export_invoices_xlsx(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """BUG-14: XLSX export with 10,000 row safety cap."""
     import openpyxl
     from openpyxl.styles import Font
+    from openpyxl.comments import Comment
 
-    invoices = db.query(Invoice).filter(Invoice.user_id == current_user.id).order_by(Invoice.created_at.desc()).all()
+    MAX_XLSX_ROWS = 10_000
+
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.user_id == current_user.id)
+        .order_by(Invoice.created_at.desc())
+        .limit(MAX_XLSX_ROWS)
+        .all()
+    )
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -523,34 +496,20 @@ def export_invoices_xlsx(
 
     ws.append(headers)
 
+    # BUG-14: Add note if export was capped
+    if len(invoices) >= MAX_XLSX_ROWS:
+        ws["A1"].comment = Comment(
+            f"Export limited to {MAX_XLSX_ROWS:,} records. Use CSV for full export.",
+            "InvoiceAI"
+        )
+
     header_font = Font(bold=True)
     for cell in ws[1]:
         cell.font = header_font
     ws.freeze_panes = "A2"
 
     for inv in invoices:
-        data = inv.data_json or {}
-        confidence_val = inv.confidence if inv.confidence is not None else 0.0
-
-        def _g(key):
-            v = data.get(key, {})
-            val = v.get("value", "") if isinstance(v, dict) else ""
-            return str(val) if val is not None else ""
-
-        row = [
-            str(inv.id),
-            str(inv.original_filename or ""),
-            str(inv.status or ""),
-            round(confidence_val, 4),
-            _g("vendor_name"),
-            _g("vendor_gstin"),
-            _g("invoice_number"),
-            _g("invoice_date"),
-            _g("total_amount"),
-            inv.created_at.isoformat() if inv.created_at else "",
-            inv.processing_time_ms if inv.processing_time_ms is not None else "",
-        ]
-        ws.append(row)
+        ws.append(_csv_row(inv))
 
     for col in ws.columns:
         max_length = 0

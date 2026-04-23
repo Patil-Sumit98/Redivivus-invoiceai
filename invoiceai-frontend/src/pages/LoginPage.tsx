@@ -21,7 +21,8 @@ export const LoginPage = () => {
       formData.append('password', password);
       
       const response = await apiClient.post('/auth/login', formData, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        withCredentials: true, // BUG-06: Required for httpOnly refresh token cookie
       });
       return response.data;
     },

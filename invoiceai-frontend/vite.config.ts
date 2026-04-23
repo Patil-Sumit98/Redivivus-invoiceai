@@ -7,12 +7,10 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   server: {
     port: 5173,
-    proxy: {
-      '/auth':     { target: 'http://localhost:8001', changeOrigin: true },
-      '/invoices': { target: 'http://localhost:8001', changeOrigin: true },
-      '/review':   { target: 'http://localhost:8001', changeOrigin: true },
-      '/webhooks': { target: 'http://localhost:8001', changeOrigin: true },
-      '/health':   { target: 'http://localhost:8001', changeOrigin: true },
-    }
+    // NOTE: Proxy rules removed because they conflict with React Router paths.
+    // The apiClient in src/api/client.ts already calls http://localhost:8001 directly,
+    // so no proxying is needed. The previous '/invoices' proxy rule was intercepting
+    // SPA page navigations like /invoices/:id and forwarding them to the backend
+    // instead of letting React Router handle them.
   }
 })
