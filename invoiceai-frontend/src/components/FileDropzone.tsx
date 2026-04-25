@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import { UploadCloud, XCircle, FileIcon as FilePdf, Image as FileImage, Loader2 } from 'lucide-react';
@@ -12,6 +12,8 @@ interface FileDropzoneProps {
 export const FileDropzone: React.FC<FileDropzoneProps> = ({ onUpload, isUploading }) => {
   const [fileError, setFileError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // BUG-FIX: Prevent multiple submissions — once clicked, lock until parent navigates away
+  const uploadSubmitted = useRef(false);
 
   const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
     setFileError(null);
@@ -47,7 +49,9 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ onUpload, isUploadin
   });
 
   const handleUploadSubmit = () => {
-    if (selectedFile) {
+    // BUG-FIX: Guard against double-click / React re-render re-trigger
+    if (selectedFile && !uploadSubmitted.current && !isUploading) {
+      uploadSubmitted.current = true;
       onUpload(selectedFile);
     }
   };
@@ -55,6 +59,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ onUpload, isUploadin
   const handleClear = () => {
     setSelectedFile(null);
     setFileError(null);
+    uploadSubmitted.current = false;
   };
 
   const isPDF = selectedFile?.type === 'application/pdf';
@@ -146,7 +151,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({ onUpload, isUploadin
             <Button 
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-md font-bold" 
               onClick={handleUploadSubmit}
-              disabled={isUploading}
+              disabled={isUploading || uploadSubmitted.current}
             >
               Upload & Process
             </Button>

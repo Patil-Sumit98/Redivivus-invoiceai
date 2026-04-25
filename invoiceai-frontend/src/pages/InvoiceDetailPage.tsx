@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useInvoiceStatus } from '../hooks/useInvoiceStatus';
 import { StatusBadge } from '../components/StatusBadge';
@@ -15,6 +15,8 @@ export const InvoiceDetailPage = () => {
   const { data: invoice, isLoading, error, isPollingTimedOut } = useInvoiceStatus(id);
   const [activeTab, setActiveTab] = useState<'data' | 'gst' | 'items' | 'json'>('data');
   const [copied, setCopied] = useState(false);
+  // Must be declared BEFORE any early returns — Rules of Hooks
+  const lockedFileUrl = useRef<string>('');
 
   if (isLoading) {
     return <div className="flex h-[80vh] items-center justify-center text-ink-500 font-medium">Loading source context...</div>;
@@ -62,10 +64,13 @@ export const InvoiceDetailPage = () => {
   };
 
   const isReviewNeeded = ['NEEDS_REVIEW', 'HUMAN_REQUIRED'].includes(invoice.status?.toUpperCase() || '');
-  // VUL-01: Use SAS URL (time-limited) instead of raw blob URL
-  const fileUrl = invoice.file_url_sas ? invoice.file_url_sas : resolveFileUrl(invoice.file_url);
+  // VUL-01: Lock SAS URL on first valid value to prevent polling from changing
+  // the iframe src and triggering repeated downloads.
+  const freshFileUrl = invoice.file_url_sas || resolveFileUrl(invoice.file_url);
+  if (freshFileUrl && !lockedFileUrl.current) lockedFileUrl.current = freshFileUrl;
+  const fileUrl = lockedFileUrl.current;
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
-  const hasFileUrl = !!fileUrl && fileUrl !== 'undefined' && fileUrl !== 'null';
+  const hasFileUrl = !!fileUrl;
   
   // Overall Confidence Ring
   const ovScore = invoice.confidence_score !== null && invoice.confidence_score !== undefined ? Math.round(invoice.confidence_score * 100) : null;

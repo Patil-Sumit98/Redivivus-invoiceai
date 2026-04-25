@@ -6,6 +6,7 @@ BUG-10: Singleton BlobServiceClient via @lru_cache to reuse connection pool.
 """
 import uuid
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -13,6 +14,18 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPerm
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ── MIME type map for inline preview ──────────────────────────────────────────
+_MIME_TYPES = {
+    '.pdf':  'application/pdf',
+    '.jpg':  'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png':  'image/png',
+}
+
+def _mime_for(filename: str) -> str:
+    ext = os.path.splitext(filename)[-1].lower()
+    return _MIME_TYPES.get(ext, 'application/octet-stream')
 
 # ── Singleton client (BUG-10) ──────────────────────────────────────────────
 _container_ensured = False
@@ -58,6 +71,9 @@ def get_blob_sas_url(blob_name: str, expiry_hours: int = 1) -> str:
     Generates a time-limited Shared Access Signature URL for a blob.
     Called on-demand by API endpoints — never stored in DB.
 
+    Sets Content-Disposition=inline and the correct Content-Type so the
+    browser renders the file in-page instead of downloading it (FIX: auto-download bug).
+
     Args:
         blob_name: The UUID.ext filename stored in the database (e.g. "abc123.pdf")
         expiry_hours: SAS token validity window (default: 1 hour)
@@ -69,6 +85,8 @@ def get_blob_sas_url(blob_name: str, expiry_hours: int = 1) -> str:
     account_name = client.credential.account_name
     account_key = client.credential.account_key
 
+    content_type = _mime_for(blob_name)
+
     sas_token = generate_blob_sas(
         account_name=account_name,
         container_name=settings.AZURE_STORAGE_CONTAINER_NAME,
@@ -76,6 +94,9 @@ def get_blob_sas_url(blob_name: str, expiry_hours: int = 1) -> str:
         account_key=account_key,
         permission=BlobSasPermissions(read=True),
         expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
+        # FIX: inline prevents the browser from downloading the file
+        content_disposition=f'inline; filename="{blob_name}"',
+        content_type=content_type,
     )
     return (
         f"https://{account_name}.blob.core.windows.net/"

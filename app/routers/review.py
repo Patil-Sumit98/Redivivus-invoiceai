@@ -16,6 +16,7 @@ from app.models.invoice import Invoice
 from app.models.review_log import ReviewLog
 from app.middleware.auth import get_current_user
 from app.services.confidence_engine import compute_confidence
+from app.utils.datetime_utils import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def get_review_queue(
             "status": inv.status,
             "confidence_score": inv.confidence,
             "original_filename": inv.original_filename,
-            "created_at": inv.created_at,
+            "created_at": utc_iso(inv.created_at),
             "gst_flags": flags,
         })
 
@@ -209,7 +210,7 @@ def get_review_history(
             "reviewer_user_id": log.reviewer_user_id,
             "action": log.action,
             "notes": log.notes,
-            "created_at": log.created_at,
+            "created_at": utc_iso(log.created_at),
         }
         for log in logs
     ]

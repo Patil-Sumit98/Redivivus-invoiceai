@@ -41,9 +41,16 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
 uvicorn==0.41.0
-opencv-python==4.9.0.80
-pyzbar==0.1.9
+# opencv-contrib-python includes the WeChat QR decoder (Layer 2 fallback).
+# Do NOT also install opencv-python — the two packages conflict.
+opencv-contrib-python==4.9.0.80
+# zxing-cpp is Layer 1 QR decoder: self-contained Windows wheel, no external DLL required.
+# Best Windows-native barcode/QR library — replaces pyzbar (Linux libzbar dependency).
+zxing-cpp==2.2.0
 Pillow==10.3.0
 pymupdf==1.24.0
 openpyxl==3.1.2
 redis==5.0.4
+# NumPy must stay < 2.0: opencv-contrib-python 4.9.x uses numpy.core.multiarray
+# which was removed in NumPy 2.0, causing '_ARRAY_API not found' at import.
+numpy==1.26.4
