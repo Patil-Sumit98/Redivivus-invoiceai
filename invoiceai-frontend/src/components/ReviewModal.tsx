@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useInvoiceStatus } from '../hooks/useInvoiceStatus';
 import { useReviewSubmit } from '../hooks/useReviewQueue';
 import { X, Loader2, Save, CheckCircle, AlertTriangle } from 'lucide-react';
@@ -15,6 +15,10 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
   const [formData, setFormData] = useState<any>({});
   const [notes, setNotes] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+  // FIX: Lock the file URL the first time it arrives so that any background
+  // query refetch (which generates a fresh SAS URL) does NOT change the
+  // iframe src and trigger another browser download.
+  const lockedFileUrl = useRef<string>('');
 
   const invoiceData = invoice?.data_json || invoice?.data;
 
@@ -84,7 +88,11 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
      );
   }
 
-  const fileUrl = resolveFileUrl(invoice.file_url);
+  // VUL-01 fix: prefer SAS URL (time-limited) over raw blob name.
+  // Lock on first valid value to prevent download loops.
+  const freshUrl = invoice.file_url_sas ? invoice.file_url_sas : resolveFileUrl(invoice.file_url);
+  if (freshUrl && !lockedFileUrl.current) lockedFileUrl.current = freshUrl;
+  const fileUrl = lockedFileUrl.current;
   const isPDF = invoice.original_filename?.toLowerCase().endsWith('.pdf');
 
   return (
@@ -113,7 +121,13 @@ export const ReviewModal = ({ invoiceId, onClose }: { invoiceId: string, onClose
              
              {/* Left Panel - File */}
              <div className="flex-1 border-b lg:border-b-0 lg:border-r border-ink-100 bg-ink-100/50 p-4 lg:p-6 flex flex-col min-h-0 overflow-auto items-center justify-center">
-                 {isPDF ? (
+                 {!fileUrl ? (
+                   <div className="flex flex-col items-center justify-center gap-3 text-ink-400">
+                     <AlertTriangle className="h-10 w-10 text-ink-300" />
+                     <p className="text-sm font-semibold">Document preview unavailable</p>
+                     <p className="text-xs text-ink-400">The file link may have expired. Try reopening this invoice.</p>
+                   </div>
+                 ) : isPDF ? (
                    <iframe src={fileUrl} className="w-full h-full min-h-[500px] rounded-lg shadow-sm border border-ink-200 bg-white" title="PDF Source" />
                  ) : (
                    <img src={fileUrl} alt="Source Document" className="max-w-full max-h-full object-contain rounded-xl shadow-sm bg-white" />

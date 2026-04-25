@@ -37,16 +37,27 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup checks + background cleanup tasks."""
     global _qr_detection_ok
 
-    # BUG-21: Check pyzbar/cv2 availability at startup
+    # WIN-01: Check zxing-cpp (Windows-native, replaces pyzbar) and cv2 availability at startup.
     try:
-        from pyzbar.pyzbar import decode  # noqa: F401
+        import zxingcpp  # noqa: F401
         import cv2  # noqa: F401
         _qr_detection_ok = True
-        logger.info("[startup] QR detection libraries loaded successfully")
+        logger.info("[startup] QR detection libraries loaded successfully (zxing-cpp + OpenCV)")
     except ImportError as e:
         _qr_detection_ok = False
-        logger.warning(f"[startup] QR detection DISABLED. Install libzbar0: {e}")
-        logger.warning("[startup] On Ubuntu: sudo apt-get install -y libzbar0 libzbar-dev")
+        logger.warning(f"[startup] QR detection DISABLED — missing library: {e}")
+        logger.warning("[startup] Run: pip install zxing-cpp opencv-contrib-python")
+    except AttributeError as e:
+        # NumPy 2.x removed numpy.core.multiarray — OpenCV 4.9.x crashes on import.
+        # Fix: pip install 'numpy<2.0'
+        _qr_detection_ok = False
+        logger.warning(
+            f"[startup] QR detection DISABLED — NumPy/OpenCV version conflict: {e}"
+        )
+        logger.warning(
+            "[startup] Fix: pip install 'numpy<2.0'  "
+            "(opencv-contrib-python 4.9.x requires NumPy < 2.0)"
+        )
 
     # BUG-16: Start stuck invoice cleanup task
     cleanup_task = asyncio.create_task(_cleanup_stuck_invoices())

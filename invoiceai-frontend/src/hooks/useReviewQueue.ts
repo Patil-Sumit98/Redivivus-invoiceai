@@ -25,8 +25,10 @@ export const useReviewSubmit = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review_queue'] });
+      queryClient.invalidateQueries({ queryKey: ['review_badge_count'] });
       queryClient.invalidateQueries({ queryKey: ['invoices_list'] });
-      queryClient.invalidateQueries({ queryKey: ['invoice'] });
+      // NOTE: do NOT invalidate ['invoice'] here — that would regenerate the SAS URL
+      // in the open modal, change the iframe src, and trigger another file download.
       queryClient.invalidateQueries({ queryKey: ['dashboard_stats'] });
     }
   });

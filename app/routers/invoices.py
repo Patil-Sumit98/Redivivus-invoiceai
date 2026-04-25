@@ -22,6 +22,7 @@ from app.models.invoice import Invoice
 from app.middleware.auth import get_current_user
 from app.middleware.rate_limit import rate_limited_user
 from app.services.blob_storage import upload_file_to_blob, get_blob_sas_url
+from app.utils.datetime_utils import utc_iso
 from app.services.azure_ai import analyze_invoice
 from app.services.invoice_mapper import map_fields, map_gst_qr_to_canonical
 
@@ -277,7 +278,7 @@ def list_invoices(
                 "id": inv.id,
                 "status": inv.status,
                 "original_filename": inv.original_filename,
-                "created_at": inv.created_at,
+                "created_at": utc_iso(inv.created_at),
                 "confidence_score": inv.confidence,
                 "vendor_name": _safe_get(inv.data_json, "vendor_name"),
                 "total_amount": _safe_get(inv.data_json, "total_amount"),
@@ -321,7 +322,7 @@ def get_invoice(
         "original_filename": invoice.original_filename,
         "file_url": invoice.file_url,        # VUL-01: blob_name (internal reference)
         "file_url_sas": file_url_sas,         # VUL-01: time-limited SAS URL for frontend
-        "created_at": invoice.created_at,
+        "created_at": utc_iso(invoice.created_at),
         "confidence_score": invoice.confidence,
         "data": invoice.data_json,
         "data_json": invoice.data_json,
