@@ -15,8 +15,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -225,32 +224,13 @@ app.include_router(invoices.router)
 app.include_router(review.router)
 app.include_router(webhooks.router)
 
-# ───────────────────────────────────────────────
-# Static Frontend (legacy HTML)
-# ───────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = BASE_DIR / "frontend"
-FRONTEND_ASSETS_DIR = FRONTEND_DIR / "assets"
-
-if FRONTEND_ASSETS_DIR.exists():
-    app.mount(
-        "/frontend/assets",
-        StaticFiles(directory=str(FRONTEND_ASSETS_DIR)),
-        name="frontend-assets",
-    )
-
-
 @app.get("/")
 def root():
-    return {"message": "InvoiceAI API v1.0", "docs": "/docs", "frontend": "/frontend"}
-
-
-@app.get("/frontend")
-def frontend_app():
-    index_file = FRONTEND_DIR / "index.html"
-    if not index_file.exists():
-        return {"message": "Frontend build not found"}
-    return FileResponse(str(index_file))
+    return {
+        "message": "InvoiceAI API v1.0",
+        "docs": "/docs",
+        "frontend": "http://localhost:5173",
+    }
 
 
 # ───────────────────────────────────────────────
