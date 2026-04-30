@@ -34,7 +34,7 @@
 ### 1. 🔐 Login Page
 > Secure JWT-based authentication. Users register with email + password (bcrypt hashed). Tokens auto-refresh in the background.
 
-![Login Page](ss/login_page.png)
+![Login Page](docs/screenshots/login_page.png)
 
 **Features:**
 - Email/password login with validation
@@ -47,7 +47,7 @@
 ### 2. 📊 Dashboard — Overview
 > Real-time command centre showing processing stats, method breakdown (QR vs OCR), average confidence ring, and the 10 most recent invoices.
 
-![Dashboard](ss/dashbourd.png)
+![Dashboard](docs/screenshots/dashbourd.png)
 
 **Features:**
 - **Total Processed** · **Auto-Approved** · **Awaiting Review** · **Failed** stat cards
@@ -61,7 +61,7 @@
 ### 3. 📤 Upload Invoice
 > Drag-and-drop invoice uploader with file preview and one-click processing trigger.
 
-![Upload Invoice](ss/upload_invoice.png)
+![Upload Invoice](docs/screenshots/upload_invoice.png)
 
 **Features:**
 - Drag-and-drop or click-to-browse file selection (PDF, JPEG, PNG — max 20 MB)
@@ -75,7 +75,7 @@
 ### 4. ⚙️ Processing in Progress
 > After upload, the background pipeline runs asynchronously. The UI polls every 2 seconds and displays a live status indicator.
 
-![Processing](ss/proccesig.png)
+![Processing](docs/screenshots/proccesig.png)
 
 **Features:**
 - Live status badge: `PROCESSING` → `AUTO_APPROVED` / `NEEDS_REVIEW` / `HUMAN_REQUIRED`
@@ -89,7 +89,7 @@
 ### 5. 📋 Invoice History
 > Paginated, filterable table of all processed invoices with an inline slide-out preview panel.
 
-![Invoice History](ss/INVOICE_HISTORY.png)
+![Invoice History](docs/screenshots/INVOICE_HISTORY.png)
 
 **Features:**
 - Server-side filtering by status: All · Processing · Auto-Approved · Needs Review · Failed
@@ -106,7 +106,7 @@
 ### 6. 🔍 Invoice Preview Panel
 > Click any row in the Invoice History to slide open this panel — view the original document and all extracted data side-by-side without leaving the page.
 
-![Human Review](ss/human%20review.png)
+![Human Review](docs/screenshots/human%20review.png)
 
 **Features:**
 - **Left pane (55%)** — PDF rendered inline via Azure SAS URL (no download triggered)
@@ -123,7 +123,7 @@
 ### 7. 🛡️ Review Queue
 > Centralised queue for all invoices flagged for human attention, sorted by urgency (HUMAN_REQUIRED first, then NEEDS_REVIEW).
 
-![Review Queue](ss/REVIEW_PAGE.png)
+![Review Queue](docs/screenshots/REVIEW_PAGE.png)
 
 **Features:**
 - Priority-sorted queue: `HUMAN_REQUIRED` (red) → `NEEDS_REVIEW` (amber)
@@ -154,7 +154,7 @@
 ### 9. ⚙️ Settings Page
 > Manage your account, API keys, and webhook integrations.
 
-![Settings](ss/SETTINGS.png)
+![Settings](docs/screenshots/SETTINGS.png)
 
 **Features:**
 - Account information display (email, organisation)
@@ -168,7 +168,7 @@
 ### 10. 📊 Excel Export
 > Download all processed invoice data as a structured Excel file for accounting and ERP workflows.
 
-![Excel Export](ss/EXEL_DATA.png)
+![Excel Export](docs/screenshots/EXEL_DATA.png)
 
 **Features:**
 - Single-click export from the Invoices or Settings page
@@ -221,7 +221,7 @@ User uploads PDF / JPEG / PNG
 ## 🛠️ Technology Stack
 
 | Layer | Technology | Version |
-|-------|-----------|---------|
+|-------|-----------|---------| 
 | **Backend API** | FastAPI | 0.135 |
 | **ORM** | SQLAlchemy | 2.0 |
 | **DB Migrations** | Alembic | 1.18 |
@@ -252,15 +252,16 @@ git clone https://github.com/Patil-Sumit98/Redivivus-invoiceai.git
 cd Redivivus-invoiceai
 ```
 
-### 2. Backend
+### 2. Backend Setup
 ```powershell
+cd backend
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Create `.env` in the project root:
+### 3. Backend Environment Variables
+Create `backend/.env` (copy from `backend/.env.example`):
 ```env
 AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
 AZURE_DOCUMENT_INTELLIGENCE_KEY=your_key_here
@@ -272,20 +273,27 @@ ENVIRONMENT=dev
 INVOICE_DATE_MAX_AGE_DAYS=1095
 ```
 
-### 4. Database
+> ⚠️ **Important:** `JWT_SECRET` must be **at least 32 characters** long. Generate one with:
+> ```bash
+> python -c "import secrets; print(secrets.token_hex(32))"
+> ```
+
+### 4. Database Migrations
 ```bash
+cd backend
 alembic upgrade head
 ```
 
 ### 5. Start Backend
 ```bash
+cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 # API docs → http://localhost:8001/docs
 ```
 
 ### 6. Start Frontend
 ```bash
-cd invoiceai-frontend
+cd frontend
 npm install
 npm run dev
 # App → http://localhost:5173
@@ -330,23 +338,41 @@ npm run dev
 ## 📁 Project Structure
 
 ```
-project_azure/
-├── app/                        # FastAPI backend
-│   ├── main.py                 # App entry, middleware, lifespan tasks
-│   ├── routers/                # auth · invoices · review · webhooks
-│   ├── models/                 # SQLAlchemy ORM models
-│   ├── services/               # pipeline · qr_detector · azure_ai · blob_storage
-│   ├── middleware/             # JWT auth · rate limiting
-│   └── utils/datetime_utils.py # UTC-aware IST datetime serialisation
-├── invoiceai-frontend/         # React + TypeScript frontend
-│   └── src/
-│       ├── pages/              # Dashboard · Upload · Invoices · Review · Detail
-│       ├── components/         # InvoicePreviewPanel · ReviewModal · FileDropzone
-│       ├── hooks/              # useInvoiceStatus · useUploadInvoice · useReviewQueue
-│       └── utils/              # IST formatters · URL resolver
-├── alembic/                    # DB migration scripts
-├── ss/                         # Application screenshots
-├── requirements.txt
+Redivivus-invoiceai/
+├── backend/                        # FastAPI backend
+│   ├── app/
+│   │   ├── main.py                 # App entry, middleware, lifespan tasks
+│   │   ├── config.py               # Pydantic settings (reads .env)
+│   │   ├── database.py             # SQLAlchemy engine + session
+│   │   ├── routers/                # auth · invoices · review · webhooks
+│   │   ├── models/                 # SQLAlchemy ORM models
+│   │   ├── schemas/                # Pydantic request/response schemas
+│   │   ├── services/               # pipeline · qr_detector · azure_ai · blob_storage
+│   │   ├── middleware/             # JWT auth · rate limiting
+│   │   └── utils/                  # datetime_utils.py (UTC-aware IST serialisation)
+│   ├── alembic/                    # DB migration scripts
+│   ├── alembic.ini                 # Alembic configuration
+│   ├── scripts/                    # seed_demo_data.py
+│   ├── requirements.txt            # Python dependencies
+│   ├── .env.example                # Environment variable template
+│   └── .env                        # Local env vars (gitignored)
+├── frontend/                       # React + TypeScript + Vite
+│   ├── src/
+│   │   ├── pages/                  # Dashboard · Upload · Invoices · Review · Detail
+│   │   ├── components/             # InvoicePreviewPanel · ReviewModal · FileDropzone
+│   │   ├── hooks/                  # useInvoiceStatus · useUploadInvoice · useReviewQueue
+│   │   ├── store/                  # Zustand auth store
+│   │   ├── api/                    # Axios client with JWT interceptors
+│   │   └── utils/                  # IST formatters · URL resolver
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.js
+│   └── .env.local                  # VITE_API_URL (gitignored)
+├── docs/
+│   ├── screenshots/                # Application screenshots for README
+│   ├── guides/                     # Implementation & bug-fix guides
+│   └── sample-invoices/            # Sample PDF invoices for testing
+├── .gitignore
 └── README.md
 ```
 

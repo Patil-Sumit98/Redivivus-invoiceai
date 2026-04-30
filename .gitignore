@@ -1,4 +1,8 @@
-# Python
+# ══════════════════════════════════════════════════
+# InvoiceAI — Git Ignore Rules
+# ══════════════════════════════════════════════════
+
+# ── Python ──────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
@@ -7,42 +11,52 @@ dist/
 build/
 *.egg
 
-# Virtual environments
+# ── Virtual Environments ───────────────────────
 venv/
 .venv/
 env/
+backend/venv/
 
-# IDE
+# ── IDE ─────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Environment
+# ── Environment Variables ──────────────────────
 .env
 .env.local
 .env.*.local
+backend/.env
+frontend/.env.local
 
-# Database files
+# ── Database Files ─────────────────────────────
 *.db
 *.sqlite3
 
-# Node.js (React frontend)
+# ── Node.js (React frontend) ──────────────────
 node_modules/
-invoiceai-frontend/node_modules/
-invoiceai-frontend/dist/
+frontend/node_modules/
+frontend/dist/
 
-# OS
+# ── OS Files ───────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Logs
+# ── Logs ───────────────────────────────────────
 *.log
 
-# Temp files
+# ── Temp / Scratch Files ──────────────────────
 out.json
 out.txt
 scaffold.py
 test_db.py
 test_gst.py
 setup_react*.bat
+errors.txt
+ts_errors.txt
+ts_errors.log
+commit_msg.txt
+
+# ── Pytest ─────────────────────────────────────
+.pytest_cache/
