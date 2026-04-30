@@ -267,7 +267,7 @@ AZURE_DOCUMENT_INTELLIGENCE_KEY=your_key_here
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
 AZURE_STORAGE_CONTAINER_NAME=invoices-test
 DATABASE_URL=sqlite:///./invoiceai.db
-JWT_SECRET=your_256bit_random_secret
+JWT_SECRET=your_secure_256bit_random_secret_string_here
 ENVIRONMENT=dev
 INVOICE_DATE_MAX_AGE_DAYS=1095
 ```
